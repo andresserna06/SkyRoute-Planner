@@ -1,7 +1,7 @@
 class Vertex:
 
     # Each vertex represents one airport in the network
-    def __init__(self, id, name, city, country, timezone, is_hub, airlines):
+    def __init__(self, id, name, city, country, timezone, is_hub, airlines, accommodation_cost, food_cost):
         self.id = id                    # IATA code, e.g. "BOG"
         self.name = name                # full airport name
         self.city = city                # city
@@ -10,6 +10,8 @@ class Vertex:
         self.is_hub = is_hub            # True if this is a major hub airport
         self.airlines = airlines        # list of airlines operating from here
         self.adjacencies = []           # list of Edge objects (outgoing routes)
+        self.accommodation_cost = accommodation_cost  # USD per night
+        self.food_cost = food_cost                    # USD per meal
 
     # Adds an outgoing route from this airport to another
     def add_adjacency(self, edge):
