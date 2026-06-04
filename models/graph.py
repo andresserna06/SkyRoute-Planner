@@ -1,3 +1,4 @@
+import math
 import networkx as nx
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
@@ -6,19 +7,18 @@ import matplotlib.patches as mpatches
 class Graph:
 
     def __init__(self):
-        self.vertices = []  # ordered list of all Vertex objects
-        self._map = {}      # dict { IATA id -> Vertex } for fast lookup
+        self.vertices = []
+        self._map = {}
+        self.aircraft_config = {}
+        self.global_config = {}
 
-    # Adds an airport node to the graph
     def add_vertex(self, vertex):
         self.vertices.append(vertex)
         self._map[vertex.id] = vertex
 
-    # Returns the Vertex with the given IATA code, or None if not found
     def get_vertex(self, id):
         return self._map.get(id)
 
-    # Prints all airports and their routes to the console (for debugging)
     def print_graph(self):
         hubs = sum(1 for v in self.vertices if v.is_hub)
         print(f"=== SkyRoute Network - {len(self.vertices)} airports ({hubs} hubs) ===\n")
@@ -30,24 +30,112 @@ class Graph:
                 print(f"       -> {a.destination_vertex.id:4s}  {a.distance_km:>6.0f} km  [{aircraft_str}]")
         print()
 
-    # Draws the air route network on screen using networkx and matplotlib
-    def visualize(self):
+    def dijkstra(self, origin_id, destination_id, weight_func=None, edge_filter=None, criterion="distance"):
+        """
+        Finds the shortest path between two airports using Dijkstra's algorithm
+        as taught in class.
 
-        # Build a networkx directed graph (used only for drawing, not for logic)
+        Algorithm choice justification:
+        Dijkstra is optimal for finding the minimum-weight path in a weighted
+        directed graph with non-negative edge weights. All optimisation criteria
+        (distance, time, cost) produce non-negative weights, so Dijkstra is the
+        correct choice over Bellman-Ford (which handles negative weights at a
+        higher cost) or A* (which requires an admissible heuristic).
+
+        The implementation follows the exact structure taught in class:
+        distance table `dist` and predecessor table `pred` are iteratively
+        updated until the destination is reached or all reachable vertices are
+        processed. At each step the unvisited vertex with the smallest distance
+        is selected.
+
+        Parameters:
+            origin_id (str): IATA code of the departure airport.
+            destination_id (str): IATA code of the arrival airport.
+            weight_func (callable, optional): Takes an Edge and returns its weight.
+                If not provided, uses the edge's getPeso() method (distance in km).
+            edge_filter (callable, optional): Takes an Edge and returns True
+                if it can be traversed. Defaults to allowing all edges.
+
+        Returns:
+            tuple (dist, pred, path) if a path exists, None if the destination
+            is unreachable.
+        """
+        if weight_func is None:
+            weight_func = lambda e: e.getPeso()
+        if edge_filter is None:
+            edge_filter = lambda e: True
+
+        # Get all vertex identifiers
+        all_ids = [v.id for v in self.vertices]
+
+        dist = {v: math.inf for v in all_ids}
+        pred = {v: None for v in all_ids}
+        dist[origin_id] = 0
+
+        unvisited = set(all_ids)
+
+        # Quick lookup: id -> Vertex object
+        vertex_map = {v.id: v for v in self.vertices}
+
+        print("=== Initial iteration ===")
+        for v in all_ids:
+            print(f"{v}: ({'∞' if dist[v] == math.inf else dist[v]}, {pred[v]})")
+        print()
+
+        while unvisited:
+            # Select the unvisited vertex with the smallest distance
+            u = min(unvisited, key=lambda v: dist[v])
+            if dist[u] == math.inf:
+                break
+
+            print(f"Processing vertex {u} with distance {dist[u]}")
+            unvisited.remove(u)
+
+            if u == destination_id:
+                print(f"\nDestination {destination_id} reached. Search complete.\n")
+                break
+
+            # Relax edges using the Edge structure
+            current_vertex = vertex_map[u]
+            for edge in current_vertex.adjacencies:
+                if not edge_filter(edge):
+                    continue
+                v = edge.destination_vertex.id
+                if v in unvisited:
+                    new_dist = dist[u] + weight_func(edge)
+                    if new_dist < dist[v]:
+                        dist[v] = new_dist
+                        pred[v] = u
+                        print(f"  Updated {v}: comes from {u}, new cost = {new_dist}")
+
+            print("\nCurrent labels:")
+            for v in all_ids:
+                cost = "∞" if dist[v] == math.inf else dist[v]
+                print(f"{v}: ({cost}, {pred[v]})")
+            print()
+
+        # Reconstruct the shortest path
+        path = []
+        current = destination_id
+        while current is not None:
+            path.insert(0, current)
+            current = pred[current]
+
+        print(f"Shortest path from {origin_id} to {destination_id}: {' → '.join(str(n) for n in path)}")
+        print(f"Total {criterion}: {dist[destination_id]}")
+        return dist, pred, path
+
+    def visualize(self):
         G = nx.DiGraph()
 
-        # Add every airport as a node
         for v in self.vertices:
             G.add_node(v.id)
 
-        # Add every route as an edge and build the label shown on it
-        # Label format: "1900 km | C,R"  (C=Comercial  R=Regional  H=Helice)
         edge_labels = {}
         for v in self.vertices:
             for a in v.adjacencies:
                 G.add_edge(v.id, a.destination_vertex.id)
 
-                # Shorten each aircraft type to a single letter
                 abbrevs = []
                 for aircraft in a.aircraft:
                     if "Comercial" in aircraft or "Commercial" in aircraft:
@@ -55,44 +143,38 @@ class Graph:
                     elif "Regional" in aircraft:
                         abbrevs.append("R")
                     else:
-                        abbrevs.append("H")  # Helice/Propeller
+                        abbrevs.append("H")
 
                 label = f"{int(a.distance_km)} km\n[{','.join(abbrevs)}]"
                 edge_labels[(v.id, a.destination_vertex.id)] = label
 
-        # Calculate node positions using spring layout
         pos = nx.spring_layout(G, seed=42, k=1.8)
 
-        # Build per-node color and size lists in the same order as self.vertices
         node_list = [v.id for v in self.vertices]
-        node_colors = ["#FF8C00" if v.is_hub else "#87CEEB" for v in self.vertices]  # orange=hub, blue=secondary
-        node_sizes  = [1300     if v.is_hub else 700        for v in self.vertices]
+        node_colors = ["#FF8C00" if v.is_hub else "#87CEEB" for v in self.vertices]
+        node_sizes  = [1300 if v.is_hub else 700 for v in self.vertices]
 
         fig, ax = plt.subplots(figsize=(20, 14))
         ax.set_title("SkyRoute Planner - Latin American Air Network", fontsize=14, fontweight="bold")
 
-        # Draw directed edges
         nx.draw_networkx_edges(
             G, pos, ax=ax,
             arrows=True, arrowsize=12,
             edge_color="#aaaaaa",
-            connectionstyle="arc3,rad=0.1",  # slight curve so bidirectional edges don't overlap
+            connectionstyle="arc3,rad=0.1",
             width=0.8
         )
 
-        # Draw all nodes in one call so that pick indices match node_list order
         nodes_coll = nx.draw_networkx_nodes(
             G, pos, ax=ax,
             nodelist=node_list,
             node_color=node_colors,
             node_size=node_sizes
         )
-        nodes_coll.set_picker(10)  # 10-point click tolerance
+        nodes_coll.set_picker(10)
 
-        # Draw IATA code labels on top of each node
         nx.draw_networkx_labels(G, pos, ax=ax, font_size=7, font_weight="bold")
 
-        # Draw edge labels (distance + aircraft type)
         nx.draw_networkx_edge_labels(
             G, pos, ax=ax,
             edge_labels=edge_labels,
@@ -101,16 +183,13 @@ class Graph:
             bbox=dict(boxstyle="round,pad=0.1", fc="white", alpha=0.6)
         )
 
-        # Legend: hub vs secondary
         hub_patch = mpatches.Patch(color="#FF8C00", label="Hub airport")
         sec_patch = mpatches.Patch(color="#87CEEB", label="Secondary airport")
         ax.legend(handles=[hub_patch, sec_patch], loc="upper left", fontsize=9)
 
-        # Footer note explaining the aircraft abbreviations
         ax.text(0.01, 0.01, "Aircraft codes: C = Commercial   R = Regional   H = Propeller",
                 transform=ax.transAxes, fontsize=8)
 
-        # Hidden annotation box that appears when the user clicks a node
         annotation = ax.annotate(
             "",
             xy=(0, 0),
@@ -122,12 +201,9 @@ class Graph:
             visible=False
         )
 
-        # Click handler: shows airport info when the user clicks near a node
         def on_click(event):
             if event.inaxes != ax:
                 return
-
-            # Find the nearest node to where the user clicked
             min_dist = float("inf")
             closest_id = None
             for node_id, (x, y) in pos.items():
@@ -135,8 +211,6 @@ class Graph:
                 if dist < min_dist:
                     min_dist = dist
                     closest_id = node_id
-
-            # Only show the popup if the click was close enough to a node
             if min_dist < 0.03:
                 v = self.get_vertex(closest_id)
                 airlines_str = ", ".join(v.airlines) if v.airlines else "N/A"
@@ -150,9 +224,7 @@ class Graph:
                 annotation.xy = pos[closest_id]
                 annotation.set_visible(True)
             else:
-                # Hide the annotation when clicking on empty space
                 annotation.set_visible(False)
-
             fig.canvas.draw_idle()
 
         fig.canvas.mpl_connect("button_press_event", on_click)

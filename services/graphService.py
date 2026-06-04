@@ -4,40 +4,44 @@ from models.edge import Edge
 from models.graph import Graph
 
 
-# Reads the JSON file and builds the Graph with all airports and routes
-def load_from_json(file_path):
+DEFAULT_AIRCRAFT_CONFIG = {
+    "Avión Comercial": {"costPerKm": 0.18, "timePerKm": 0.7},
+    "Jet Regional": {"costPerKm": 0.25, "timePerKm": 1.1},
+    "Avión de Hélice": {"costPerKm": 0.12, "timePerKm": 2.5},
+}
 
-    # Open and parse the JSON file
+
+def load_from_json(file_path):
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
 
-    # Create an empty graph
     graph = Graph()
 
     # --- First pass: create one Vertex per airport ---
-    # We do this first so all nodes exist before we start linking them with edges
     for node in data["nodes"]:
         v = Vertex(
             id=node["id"],
             name=node["name"],
             city=node["city"],
             country=node["country"],
-            timezone=node["timezone"],
+            timezone=node.get("timezone", ""),
             is_hub=node.get("isHub", False),
-            airlines=node.get("airlines", [])
+            airlines=node.get("airlines", []),
+            accommodation_cost=node.get("accommodationCost", 0),
+            food_cost=node.get("foodCost", 0),
+            activities=node.get("activities", []),
+            jobs=node.get("jobs", [])
         )
         graph.add_vertex(v)
 
-    # --- Second pass: create one Edge per route and link it to its origin airport ---
+    # --- Second pass: create one Edge per route ---
     for item in data["edges"]:
-        origin_id  = item["origin"]
+        origin_id = item["origin"]
         destination_id = item["destination"]
 
-        # Look up both airports by their IATA code
-        origin  = graph.get_vertex(origin_id)
+        origin = graph.get_vertex(origin_id)
         destination = graph.get_vertex(destination_id)
 
-        # Stop loading if the JSON references an airport that was not declared in "nodes"
         if origin is None:
             raise ValueError(f"Route references unknown origin airport: '{origin_id}'")
         if destination is None:
@@ -46,10 +50,24 @@ def load_from_json(file_path):
         edge = Edge(
             destination_vertex=destination,
             distance_km=item["distanceKm"],
-            aircraft=item["aircraft"]
+            aircraft=item.get("aircraft", []),
+            base_cost=item.get("baseCost", 1),
+            minimum_stay=item.get("minimumStay", 0)
         )
-
-        # Attach the route to the origin airport's adjacency list
         origin.add_adjacency(edge)
+
+    # --- Load aircraft configuration ---
+    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves")
+    if config:
+        for name, values in config.items():
+            graph.aircraft_config[name] = {
+                "costPerKm": values.get("costPerKm") or values.get("costoKm", 0.18),
+                "timePerKm": values.get("timePerKm") or values.get("tiempoKm", 0.7),
+            }
+    else:
+        graph.aircraft_config = dict(DEFAULT_AIRCRAFT_CONFIG)
+
+    # --- Store the full global configuration for later use (R2.3) ---
+    graph.global_config = data.get("aircraftConfig") or data.get("configuracionGlobal", {})
 
     return graph

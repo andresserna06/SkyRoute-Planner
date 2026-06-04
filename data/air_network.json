@@ -586,6 +586,20 @@
         "Avión Comercial"
       ],
       "minimumStay": 90
+    },
+      {
+      "origin": "MDE",
+      "destination": "PTY",
+      "distanceKm": 680,
+      "aircraft": ["Avión de Hélice", "Jet Regional"],
+      "minimumStay": 90
+    },
+    {
+      "origin": "PTY",
+      "destination": "MDE",
+      "distanceKm": 680,
+      "aircraft": ["Avión de Hélice", "Jet Regional"],
+      "minimumStay": 90
     }
   ]
 }
