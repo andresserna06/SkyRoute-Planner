@@ -11,10 +11,9 @@ DEFAULT_AIRCRAFT_CONFIG = {
 }
 
 
-def load_from_json(file_path):
-    with open(file_path, encoding="utf-8") as f:
-        data = json.load(f)
-
+def build_graph_from_dict(data):
+    # Builds a Graph object from an already-parsed JSON dict.
+    # Called by load_from_json and by the web dashboard when a file is uploaded.
     graph = Graph()
 
     # First pass: create one Vertex per airport
@@ -36,10 +35,10 @@ def load_from_json(file_path):
 
     # Second pass: create one Edge per route
     for item in data["edges"]:
-        origin_id = item["origin"]
+        origin_id      = item["origin"]
         destination_id = item["destination"]
 
-        origin = graph.get_vertex(origin_id)
+        origin      = graph.get_vertex(origin_id)
         destination = graph.get_vertex(destination_id)
 
         if origin is None:
@@ -71,3 +70,10 @@ def load_from_json(file_path):
     graph.global_config = data.get("aircraftConfig") or data.get("configuracionGlobal", {})
 
     return graph
+
+
+def load_from_json(file_path):
+    # Reads a JSON file from disk and returns a Graph — used by the CLI (app.py).
+    with open(file_path, encoding="utf-8") as f:
+        data = json.load(f)
+    return build_graph_from_dict(data)
