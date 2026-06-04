@@ -17,7 +17,7 @@ def load_from_json(file_path):
 
     graph = Graph()
 
-    # --- First pass: create one Vertex per airport ---
+    # First pass: create one Vertex per airport
     for node in data["nodes"]:
         v = Vertex(
             id=node["id"],
@@ -34,7 +34,7 @@ def load_from_json(file_path):
         )
         graph.add_vertex(v)
 
-    # --- Second pass: create one Edge per route ---
+    # Second pass: create one Edge per route
     for item in data["edges"]:
         origin_id = item["origin"]
         destination_id = item["destination"]
@@ -56,7 +56,7 @@ def load_from_json(file_path):
         )
         origin.add_adjacency(edge)
 
-    # --- Load aircraft configuration ---
+    # Load aircraft config from JSON or fall back to defaults
     config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves")
     if config:
         for name, values in config.items():
@@ -67,7 +67,7 @@ def load_from_json(file_path):
     else:
         graph.aircraft_config = dict(DEFAULT_AIRCRAFT_CONFIG)
 
-    # --- Store the full global configuration for later use (R2.3) ---
+    # Store full global config for R2.3
     graph.global_config = data.get("aircraftConfig") or data.get("configuracionGlobal", {})
 
     return graph

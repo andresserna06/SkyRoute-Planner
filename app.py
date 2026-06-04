@@ -1,10 +1,5 @@
-"""
-SkyRoute Planner — Main entry point.
-
-Usage:
-    python app.py              Interactive CLI menu
-    python app.py --test       Run built-in test cases
-"""
+# SkyRoute Planner — Main entry point
+# Usage: python app.py (interactive) or python app.py --test
 
 import sys
 from services.graphService import load_from_json
@@ -17,7 +12,7 @@ from services.dynamicService import run_dynamic_itinerary
 
 
 def list_airports(graph):
-    """Prints all airports with their IATA code, city and country."""
+    # Print all airports with IATA code, city and country
     print(f"\n{'Code':<6} {'Type':<11} {'City, Country':<30}")
     print("-" * 50)
     for v in graph.vertices:
@@ -27,7 +22,7 @@ def list_airports(graph):
 
 
 def print_proposal_result(title, result):
-    """Pretty-prints the result of a DFS proposal."""
+    # Pretty-print a DFS proposal result
     print(f"\n{'='*60}")
     print(f"  {title}")
     print(f"{'='*60}")
@@ -51,7 +46,7 @@ def print_proposal_result(title, result):
 
 
 def print_route_results(results):
-    """Pretty-prints the results of a manual route search."""
+    # Pretty-print manual route search results
     for r in results:
         print(f"\n  Criterion: {r['criterion'].upper()}")
         if not r["success"]:
@@ -67,7 +62,7 @@ def print_route_results(results):
 
 
 def run_interactive(graph):
-    """Interactive CLI menu for testing Requirement 2.2."""
+    # Interactive CLI menu for R2.2 / R2.3
     while True:
         print("\n" + "=" * 60)
         print("   SKYROUTE PLANNER — Basic Itinerary Planning (R2.2)")
@@ -148,7 +143,7 @@ def run_interactive(graph):
 
 
 def run_tests():
-    """Runs a set of pre-defined test cases to validate R2.2 logic."""
+    # Run pre-defined test cases for R2.2 validation
     print("Loading graph from data/air_network.json ...")
     graph = load_from_json("data/air_network.json")
     print(f"Loaded {len(graph.vertices)} airports.\n")

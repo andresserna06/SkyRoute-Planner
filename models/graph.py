@@ -31,35 +31,9 @@ class Graph:
         print()
 
     def dijkstra(self, origin_id, destination_id, weight_func=None, edge_filter=None, criterion="distance"):
-        """
-        Finds the shortest path between two airports using Dijkstra's algorithm
-        as taught in class.
-
-        Algorithm choice justification:
-        Dijkstra is optimal for finding the minimum-weight path in a weighted
-        directed graph with non-negative edge weights. All optimisation criteria
-        (distance, time, cost) produce non-negative weights, so Dijkstra is the
-        correct choice over Bellman-Ford (which handles negative weights at a
-        higher cost) or A* (which requires an admissible heuristic).
-
-        The implementation follows the exact structure taught in class:
-        distance table `dist` and predecessor table `pred` are iteratively
-        updated until the destination is reached or all reachable vertices are
-        processed. At each step the unvisited vertex with the smallest distance
-        is selected.
-
-        Parameters:
-            origin_id (str): IATA code of the departure airport.
-            destination_id (str): IATA code of the arrival airport.
-            weight_func (callable, optional): Takes an Edge and returns its weight.
-                If not provided, uses the edge's getPeso() method (distance in km).
-            edge_filter (callable, optional): Takes an Edge and returns True
-                if it can be traversed. Defaults to allowing all edges.
-
-        Returns:
-            tuple (dist, pred, path) if a path exists, None if the destination
-            is unreachable.
-        """
+        # Dijkstra's algorithm: finds min-weight path in a directed graph
+        # with non-negative edges. Uses dist/pred tables, selects the
+        # unvisited vertex with smallest distance at each step.
         if weight_func is None:
             weight_func = lambda e: e.getPeso()
         if edge_filter is None:

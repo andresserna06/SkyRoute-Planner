@@ -1,22 +1,11 @@
-"""
-dynamicService.py — Advanced itinerary planning with dynamic budget (R2.3).
-
-Provides an interactive step-by-step planner where the traveler:
-  - Chooses the aircraft for each segment from the available options
-  - Can work at destination airports to increase their budget
-  - Sees real-time cost, time, and budget updates after each decision
-"""
+# dynamicService.py — R2.3: interactive step-by-step planner where the traveler
+# chooses aircraft per segment and can work at airports to earn more budget
 
 from services.itineraryService import _edge_cost, _edge_time
 
 
 def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget):
-    """
-    Returns all viable flights from *vertex* with each aircraft option.
-
-    Each entry: (edge, aircraft_name, cost, time_minutes)
-    Only flights the traveller can afford (cost <= budget) are included.
-    """
+    # Return list of (edge, aircraft, cost, time) for affordable flights from vertex
     options = []
     for edge in vertex.adjacencies:
         dest_id = edge.destination_vertex.id
@@ -31,7 +20,7 @@ def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km,
 
 
 def _display_flights(origin_id, options):
-    """Pretty-prints available flights with aircraft, cost and time."""
+    # Print available flights with aircraft, cost and time
     print(f"\n  Flights from {origin_id}:")
     print(f"  {'#':<3} {'Destination':<12} {'Aircraft':<22} {'Cost (USD)':<12} {'Time (min)':<10}")
     print(f"  {'-'*3} {'-'*12} {'-'*22} {'-'*12} {'-'*10}")
@@ -41,7 +30,7 @@ def _display_flights(origin_id, options):
 
 
 def _display_jobs(vertex):
-    """Shows available jobs at the current airport."""
+    # Print available jobs at the current airport
     if not vertex.jobs:
         return []
     print(f"\n  Available jobs at {vertex.id}:")
@@ -53,16 +42,7 @@ def _display_jobs(vertex):
 
 
 def run_dynamic_itinerary(graph, origin_id, initial_budget):
-    """
-    Runs the interactive step-by-step itinerary planner (R2.3).
-
-    The traveller starts at *origin_id* with *initial_budget* USD.
-    At each step they see available flights with aircraft options,
-    choose one, and may work at the destination to earn more money.
-    The loop ends when no affordable flights remain.
-
-    Returns a summary dict with the full itinerary.
-    """
+    # Interactive loop: show flights -> traveller picks -> work at destination -> repeat
     current = graph.get_vertex(origin_id)
     if current is None:
         return {"success": False, "error": f"Unknown origin: {origin_id}"}

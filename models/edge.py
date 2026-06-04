@@ -12,8 +12,7 @@ class Edge:
         return self.distance_km
 
     def getPeso(self):
-        """getPeso: returns the edge weight (distance in km).
-        Matches the getPeso method used in Dijkstra's algorithm as taught in class."""
+        # Returns edge weight (distance in km), matches the Dijkstra method from class
         return self.distance_km
 
     def __repr__(self):
