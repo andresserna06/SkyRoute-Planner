@@ -9,6 +9,7 @@ class Traveler:
         self.current_time = 0
         self.food_interval = food_interval
         self.accommodation_interval = accommodation_interval
+        self.arrival_time = 0 
 
 
     # El viajero ya aterrizó
@@ -35,7 +36,7 @@ class Traveler:
         arrival_time = self.current_time + flight_duration
         
         # Comidas durante el vuelo — costo del nodo actual (origen)
-        meals = (arrival_time - self.last_food) // self.food_interval
+        meals = (self.  arrival_time - self.last_food) // self.food_interval
         if meals > 0:
             cost = meals * self.current_location.food_cost
             self.last_food += meals * self.food_interval
@@ -43,4 +44,18 @@ class Traveler:
             self.total_cost += cost
         
         # Actualizar tiempo actual a hora de llegada
-        self.current_time = arrival_time        
+        self.arrival_time = arrival_time     
+        
+        
+    def do_activity(self, activity, edge):
+        duration_activity = activity["durationMin"] / 60
+        finish_time = self.current_time + duration_activity
+        available_until = self.arrival_time + (edge.minimum_stay / 60)
+        
+        if finish_time <= available_until:
+            self.current_time = finish_time
+            self.total_cost += activity["costUSD"]
+            self.budget -= activity["costUSD"]
+            self.check_obligatory(self.current_location)
+        else:
+            print(f"No hay tiempo suficiente para realizar {activity['name']}")
