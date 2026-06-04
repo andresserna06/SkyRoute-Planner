@@ -13,6 +13,7 @@ from services.itineraryService import (
     propose_max_coverage_by_time,
     find_best_routes,
 )
+from services.dynamicService import run_dynamic_itinerary
 
 
 def list_airports(graph):
@@ -75,7 +76,8 @@ def run_interactive(graph):
         print("  2. Proposal A — Max coverage by budget")
         print("  3. Proposal B — Max coverage by time")
         print("  4. Manual route search (Dijkstra)")
-        print("  5. Visualise network (matplotlib)")
+        print("  5. Dynamic itinerary (R2.3)")
+        print("  6. Visualise network (matplotlib)")
         print("  0. Exit")
         print("-" * 60)
 
@@ -126,6 +128,15 @@ def run_interactive(graph):
             print_route_results(results)
 
         elif choice == "5":
+            origin = input("  Origin IATA code: ").strip().upper()
+            try:
+                budget = float(input("  Initial budget (USD): "))
+            except ValueError:
+                print("  Invalid number.\n")
+                continue
+            run_dynamic_itinerary(graph, origin, budget)
+
+        elif choice == "6":
             graph.visualize()
 
         elif choice == "0":
