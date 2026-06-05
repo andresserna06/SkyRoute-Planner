@@ -56,7 +56,7 @@ def build_graph_from_dict(data):
         origin.add_adjacency(edge)
 
     # Load aircraft config from JSON or fall back to defaults
-    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves")
+    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves") or data.get("config", {}).get("aircraft")
     if config:
         for name, values in config.items():
             graph.aircraft_config[name] = {

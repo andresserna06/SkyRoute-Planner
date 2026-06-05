@@ -51,22 +51,15 @@ class Graph:
         # Quick lookup: id -> Vertex object
         vertex_map = {v.id: v for v in self.vertices}
 
-        print("=== Initial iteration ===")
-        for v in all_ids:
-            print(f"{v}: ({'∞' if dist[v] == math.inf else dist[v]}, {pred[v]})")
-        print()
-
         while unvisited:
             # Select the unvisited vertex with the smallest distance
             u = min(unvisited, key=lambda v: dist[v])
             if dist[u] == math.inf:
                 break
 
-            print(f"Processing vertex {u} with distance {dist[u]}")
             unvisited.remove(u)
 
             if u == destination_id:
-                print(f"\nDestination {destination_id} reached. Search complete.\n")
                 break
 
             # Relax edges using the Edge structure
@@ -80,13 +73,7 @@ class Graph:
                     if new_dist < dist[v]:
                         dist[v] = new_dist
                         pred[v] = u
-                        print(f"  Updated {v}: comes from {u}, new cost = {new_dist}")
 
-            print("\nCurrent labels:")
-            for v in all_ids:
-                cost = "∞" if dist[v] == math.inf else dist[v]
-                print(f"{v}: ({cost}, {pred[v]})")
-            print()
 
         # Reconstruct the shortest path
         path = []
@@ -95,8 +82,6 @@ class Graph:
             path.insert(0, current)
             current = pred[current]
 
-        print(f"Shortest path from {origin_id} to {destination_id}: {' → '.join(str(n) for n in path)}")
-        print(f"Total {criterion}: {dist[destination_id]}")
         return dist, pred, path
 
     def visualize(self):

@@ -14,6 +14,46 @@ from dash import dcc, html, Input, Output, State
 import dash_cytoscape as cyto
 
 from services.graphService import build_graph_from_dict
+from services.itineraryService import (
+    propose_max_coverage_by_budget,
+    propose_max_coverage_by_time,
+    find_best_routes,
+)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def _load_default_data():
+    try:
+        with open("data/air_network.json", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _build_graph_from_store(data):
+    if data is None:
+        return None
+    return build_graph_from_dict(data)
+
+
+# ── Tab styling ──────────────────────────────────────────────────────────────
+TAB_STYLE = {
+    "padding": "6px 10px",
+    "fontSize": "11px",
+    "fontWeight": "600",
+    "color": "#5d6b80",
+    "backgroundColor": "#f6f8fb",
+    "border": "none",
+    "borderBottom": "2px solid transparent",
+}
+TAB_SELECTED_STYLE = {
+    "padding": "6px 10px",
+    "fontSize": "11px",
+    "fontWeight": "700",
+    "color": "#1e293b",
+    "backgroundColor": "#f6f8fb",
+    "border": "none",
+    "borderBottom": f"2px solid #7c3aed",
+}
 
 
 # ── Color palette (single source of truth for the whole UI) ───────────────────
@@ -357,6 +397,10 @@ app.layout = html.Div(
                     "height": "3px",
                     "background": f"linear-gradient(90deg, {COLORS['hub']}, {COLORS['highlight']}, {COLORS['secondary']})",
                 }),
+                # Hidden stores for cross-callback state
+                dcc.Store(id="graph-data",     data=None),
+                dcc.Store(id="dynamic-state",  data=None),
+                dcc.Store(id="dynamic-step",   data=0),
             ],
         ),
 
@@ -365,137 +409,355 @@ app.layout = html.Div(
             style={"display": "flex", "flex": 1, "overflow": "hidden"},
             children=[
 
-                # Left sidebar
+                # Left sidebar — tabbed interface (R1 visualisation + R2.2 / R2.3)
                 html.Div(
                     style={
-                        "width":           "270px",
-                        "minWidth":        "270px",
+                        "width":           "320px",
+                        "minWidth":        "320px",
                         "backgroundColor": COLORS["bg_panel"],
                         "borderRight":     f"1px solid {COLORS['border']}",
-                        "padding":         "22px 18px",
+                        "padding":         "0",
                         "display":         "flex",
                         "flexDirection":   "column",
-                        "gap":             "20px",
                         "overflowY":       "auto",
                     },
                     children=[
+                        dcc.Tabs(
+                            id="sidebar-tabs",
+                            value="vis",
+                            style={"flexShrink": 0},
+                            children=[
 
-                        # ── File upload ───────────────────────────────────────
-                        html.Div([
-                            html.H4("Cargar red aérea", style=SECTION_TITLE),
-                            dcc.Upload(
-                                id="upload-json",
-                                children=html.Div([
-                                    html.Div("⤓", style={"fontSize": "22px",
-                                                          "color": COLORS["secondary"],
-                                                          "marginBottom": "4px"}),
-                                    "Arrastra el archivo JSON aquí",
-                                    html.Br(),
-                                    html.A(
-                                        "o haz clic para seleccionarlo",
-                                        style={"color": COLORS["secondary"],
-                                               "textDecoration": "underline", "cursor": "pointer"},
-                                    ),
-                                ]),
-                                style={
-                                    "width":           "100%",
-                                    "padding":         "18px 10px",
-                                    "borderWidth":     "1.5px",
-                                    "borderStyle":     "dashed",
-                                    "borderRadius":    "10px",
-                                    "borderColor":     COLORS["border"],
-                                    "textAlign":       "center",
-                                    "fontSize":        "12px",
-                                    "color":           COLORS["text_dim"],
-                                    "backgroundColor": COLORS["bg_panel_2"],
-                                    "cursor":          "pointer",
-                                    "boxSizing":       "border-box",
-                                    "lineHeight":      "1.6",
-                                },
-                                accept=".json",
-                            ),
-                            html.Div(id="upload-status", style={"marginTop": "8px", "minHeight": "16px"}),
-                        ]),
+                                # ── TAB: Visualización ─────────────────────────
+                                dcc.Tab(label="Vis", value="vis",
+                                        style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE,
+                                        children=[html.Div(
+                                style={"padding": "14px 16px", "display": "flex",
+                                       "flexDirection": "column", "gap": "14px"},
+                                children=[
+                                    html.Div([
+                                        html.H4("Cargar red a\u00e9rea", style=SECTION_TITLE),
+                                        dcc.Upload(
+                                            id="upload-json",
+                                            children=html.Div([
+                                                html.Div("\u2913", style={"fontSize": "22px",
+                                                    "color": COLORS["secondary"], "marginBottom": "4px"}),
+                                                "Arrastra el archivo JSON aqu\u00ed",
+                                                html.Br(),
+                                                html.A("o haz clic para seleccionarlo",
+                                                    style={"color": COLORS["secondary"],
+                                                           "textDecoration": "underline", "cursor": "pointer"}),
+                                            ]),
+                                            style={"width": "100%", "padding": "14px 10px",
+                                                "borderWidth": "1.5px", "borderStyle": "dashed",
+                                                "borderRadius": "10px", "borderColor": COLORS["border"],
+                                                "textAlign": "center", "fontSize": "12px",
+                                                "color": COLORS["text_dim"],
+                                                "backgroundColor": COLORS["bg_panel_2"],
+                                                "cursor": "pointer", "boxSizing": "border-box",
+                                                "lineHeight": "1.6"},
+                                            accept=".json"),
+                                        html.Div(id="upload-status",
+                                                 style={"marginTop": "6px", "minHeight": "16px"}),
+                                    ]),
+                                    html.Div([
+                                        html.H4("Disposici\u00f3n del grafo", style=SECTION_TITLE),
+                                        dcc.Dropdown(id="layout-dropdown",
+                                            options=[
+                                                {"label": "Org\u00e1nica (fuerzas)", "value": "cose"},
+                                                {"label": "Conc\u00e9ntrica (hubs al centro)", "value": "concentric"},
+                                                {"label": "Circular", "value": "circle"}],
+                                            value="cose", clearable=False,
+                                            style={"fontSize": "13px", "color": "#1a2440"}),
+                                    ]),
+                                    html.Hr(style={"margin": "0", "border": "none",
+                                                   "borderTop": f"1px solid {COLORS['border']}"}),
+                                    html.Div([
+                                        html.H4("Leyenda", style=SECTION_TITLE),
+                                        legend_row({"width": "20px", "height": "20px", "borderRadius": "50%",
+                                                     "backgroundColor": COLORS["hub"],
+                                                     "border": f"2px solid {COLORS['hub_border']}"},
+                                                    "Aeropuerto hub"),
+                                        legend_row({"width": "14px", "height": "14px", "borderRadius": "50%",
+                                                     "backgroundColor": COLORS["secondary"],
+                                                     "border": f"2px solid {COLORS['sec_border']}"},
+                                                    "Aeropuerto secundario"),
+                                        legend_row({"width": "28px", "height": "2px",
+                                                     "backgroundColor": COLORS["route"]}, "Ruta regular"),
+                                        legend_row({"width": "28px", "height": "0",
+                                                     "borderTop": f"2px dashed {COLORS['subsidized']}"},
+                                                    "Ruta subsidiada"),
+                                    ]),
+                                    html.Hr(style={"margin": "0", "border": "none",
+                                                   "borderTop": f"1px solid {COLORS['border']}"}),
+                                    html.Div([
+                                        html.H4("Tipos de aeronave", style=SECTION_TITLE),
+                                        html.Div("C  \u00b7  Avi\u00f3n Comercial",
+                                                 style={"fontSize": "12px", "color": COLORS["text_dim"], "marginBottom": "4px"}),
+                                        html.Div("R  \u00b7  Jet Regional",
+                                                 style={"fontSize": "12px", "color": COLORS["text_dim"], "marginBottom": "4px"}),
+                                        html.Div("H  \u00b7  Avi\u00f3n de H\u00e9lice",
+                                                 style={"fontSize": "12px", "color": COLORS["text_dim"]}),
+                                    ]),
+                                    html.Hr(style={"margin": "0", "border": "none",
+                                                   "borderTop": f"1px solid {COLORS['border']}"}),
+                                    html.Button("\u21ba  Ver todo el grafo",
+                                        id="clear-selection", n_clicks=0,
+                                        style={"width": "100%", "padding": "8px 12px",
+                                            "backgroundColor": COLORS["bg_panel_2"],
+                                            "color": COLORS["text"],
+                                            "border": f"1px solid {COLORS['border']}",
+                                            "borderRadius": "8px", "fontSize": "12px",
+                                            "fontWeight": "600",
+                                            "fontFamily": "Inter, Segoe UI, sans-serif",
+                                            "cursor": "pointer"}),
+                                    html.Div(id="airport-info", children=_placeholder()),
+                                ])]),
 
-                        # ── Layout selector ───────────────────────────────────
-                        html.Div([
-                            html.H4("Disposición del grafo", style=SECTION_TITLE),
-                            dcc.Dropdown(
-                                id="layout-dropdown",
-                                options=[
-                                    {"label": "Orgánica (fuerzas)",   "value": "cose"},
-                                    {"label": "Concéntrica (hubs al centro)", "value": "concentric"},
-                                    {"label": "Circular",             "value": "circle"},
-                                ],
-                                value="cose",
-                                clearable=False,
-                                style={"fontSize": "13px", "color": "#1a2440"},
-                            ),
-                        ]),
+                                # ── TAB: Presupuesto (Propuesta A) ─────────────
+                                dcc.Tab(label="$", value="budget",
+                                        style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE,
+                                        children=[html.Div(
+                                style={"padding": "14px 16px", "display": "flex",
+                                       "flexDirection": "column", "gap": "10px"},
+                                children=[
+                                    html.H4("M\u00e1x. destinos por presupuesto", style=SECTION_TITLE),
+                                    html.Div("Origen:", style={"fontSize": "12px", "fontWeight": "600",
+                                                               "color": COLORS["text"]}),
+                                    dcc.Input(id="budget-origin", type="text", placeholder="Ej: BOG",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Presupuesto m\u00e1ximo (USD):", style={"fontSize": "12px",
+                                        "fontWeight": "600", "color": COLORS["text"]}),
+                                    dcc.Input(id="budget-amount", type="number", placeholder="Ej: 500",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("L\u00edmite de tiempo (horas, opcional):",
+                                             style={"fontSize": "12px", "fontWeight": "600",
+                                                    "color": COLORS["text"]}),
+                                    dcc.Input(id="budget-time", type="number", placeholder="Ej: 24",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Aeronaves preferidas:", style={"fontSize": "12px",
+                                        "fontWeight": "600", "color": COLORS["text"]}),
+                                    dcc.Checklist(id="budget-aircraft",
+                                        options=[
+                                            {"label": " Avi\u00f3n Comercial", "value": "Avión Comercial"},
+                                            {"label": " Jet Regional",       "value": "Jet Regional"},
+                                            {"label": " Avi\u00f3n de H\u00e9lice", "value": "Avión de Hélice"}],
+                                        style={"fontSize": "12px", "color": COLORS["text"]}),
+                                    html.Button("Calcular ruta", id="budget-btn", n_clicks=0,
+                                        style={"width": "100%", "padding": "9px", "marginTop": "4px",
+                                               "backgroundColor": COLORS["hub"], "color": "#fff",
+                                               "border": "none", "borderRadius": "8px",
+                                               "fontSize": "13px", "fontWeight": "700",
+                                               "fontFamily": "Inter, Segoe UI, sans-serif",
+                                               "cursor": "pointer"}),
+                                    html.Div(id="budget-result",
+                                             style={"fontSize": "12px", "color": COLORS["text"]}),
+                                ])]),
 
-                        html.Hr(style={"margin": "0", "border": "none",
-                                       "borderTop": f"1px solid {COLORS['border']}"}),
+                                # ── TAB: Tiempo (Propuesta B) ───────────────────
+                                dcc.Tab(label="\u23f1", value="time",
+                                        style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE,
+                                        children=[html.Div(
+                                style={"padding": "14px 16px", "display": "flex",
+                                       "flexDirection": "column", "gap": "10px"},
+                                children=[
+                                    html.H4("M\u00e1x. destinos por tiempo", style=SECTION_TITLE),
+                                    html.Div("Origen:", style={"fontSize": "12px", "fontWeight": "600",
+                                                               "color": COLORS["text"]}),
+                                    dcc.Input(id="time-origin", type="text", placeholder="Ej: LIM",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Tiempo disponible (horas):", style={"fontSize": "12px",
+                                        "fontWeight": "600", "color": COLORS["text"]}),
+                                    dcc.Input(id="time-limit", type="number", placeholder="Ej: 8",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Presupuesto m\u00e1ximo (USD, opcional):",
+                                             style={"fontSize": "12px", "fontWeight": "600",
+                                                    "color": COLORS["text"]}),
+                                    dcc.Input(id="time-budget", type="number", placeholder="Ej: 1000",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Aeronaves preferidas:", style={"fontSize": "12px",
+                                        "fontWeight": "600", "color": COLORS["text"]}),
+                                    dcc.Checklist(id="time-aircraft",
+                                        options=[
+                                            {"label": " Avi\u00f3n Comercial", "value": "Avión Comercial"},
+                                            {"label": " Jet Regional",       "value": "Jet Regional"},
+                                            {"label": " Avi\u00f3n de H\u00e9lice", "value": "Avión de Hélice"}],
+                                        style={"fontSize": "12px", "color": COLORS["text"]}),
+                                    html.Button("Calcular ruta", id="time-btn", n_clicks=0,
+                                        style={"width": "100%", "padding": "9px", "marginTop": "4px",
+                                               "backgroundColor": COLORS["secondary"], "color": "#fff",
+                                               "border": "none", "borderRadius": "8px",
+                                               "fontSize": "13px", "fontWeight": "700",
+                                               "fontFamily": "Inter, Segoe UI, sans-serif",
+                                               "cursor": "pointer"}),
+                                    html.Div(id="time-result",
+                                             style={"fontSize": "12px", "color": COLORS["text"]}),
+                                ])]),
 
-                        # ── Legend ────────────────────────────────────────────
-                        html.Div([
-                            html.H4("Leyenda", style=SECTION_TITLE),
-                            legend_row(
-                                {"width": "20px", "height": "20px", "borderRadius": "50%",
-                                 "backgroundColor": COLORS["hub"],
-                                 "border": f"2px solid {COLORS['hub_border']}"},
-                                "Aeropuerto hub",
-                            ),
-                            legend_row(
-                                {"width": "14px", "height": "14px", "borderRadius": "50%",
-                                 "backgroundColor": COLORS["secondary"],
-                                 "border": f"2px solid {COLORS['sec_border']}"},
-                                "Aeropuerto secundario",
-                            ),
-                            legend_row(
-                                {"width": "28px", "height": "2px", "backgroundColor": COLORS["route"]},
-                                "Ruta regular",
-                            ),
-                            legend_row(
-                                {"width": "28px", "height": "0", "borderTop": f"2px dashed {COLORS['subsidized']}"},
-                                "Ruta subsidiada",
-                            ),
-                        ]),
+                                # ── TAB: B\u00fasqueda Manual ────────────────────
+                                dcc.Tab(label="Ruta", value="search",
+                                        style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE,
+                                        children=[html.Div(
+                                style={"padding": "14px 16px", "display": "flex",
+                                       "flexDirection": "column", "gap": "10px"},
+                                children=[
+                                    html.H4("B\u00fasqueda manual de ruta", style=SECTION_TITLE),
+                                    html.Div("Origen:", style={"fontSize": "12px", "fontWeight": "600",
+                                                               "color": COLORS["text"]}),
+                                    dcc.Input(id="search-origin", type="text", placeholder="Ej: BOG",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Destino:", style={"fontSize": "12px", "fontWeight": "600",
+                                                                "color": COLORS["text"]}),
+                                    dcc.Input(id="search-dest", type="text", placeholder="Ej: LIM",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Criterio(s) de optimizaci\u00f3n:",
+                                             style={"fontSize": "12px", "fontWeight": "600",
+                                                    "color": COLORS["text"]}),
+                                    dcc.Checklist(id="search-criteria",
+                                        options=[
+                                            {"label": " Distancia", "value": "distance"},
+                                            {"label": " Tiempo",    "value": "time"},
+                                            {"label": " Costo",     "value": "cost"}],
+                                        value=["distance"],
+                                        style={"fontSize": "12px", "color": COLORS["text"]}),
+                                    html.Div("Incluir aeropuertos secundarios:",
+                                             style={"fontSize": "12px", "fontWeight": "600",
+                                                    "color": COLORS["text"]}),
+                                    dcc.RadioItems(id="search-secondary",
+                                        options=[
+                                            {"label": " S\u00ed", "value": True},
+                                            {"label": " No",  "value": False}],
+                                        value=True,
+                                        style={"fontSize": "12px", "color": COLORS["text"]}),
+                                    html.Div("Aeronaves preferidas:", style={"fontSize": "12px",
+                                        "fontWeight": "600", "color": COLORS["text"]}),
+                                    dcc.Checklist(id="search-aircraft",
+                                        options=[
+                                            {"label": " Avi\u00f3n Comercial", "value": "Avión Comercial"},
+                                            {"label": " Jet Regional",       "value": "Jet Regional"},
+                                            {"label": " Avi\u00f3n de H\u00e9lice", "value": "Avión de Hélice"}],
+                                        style={"fontSize": "12px", "color": COLORS["text"]}),
+                                    html.Button("Buscar ruta", id="search-btn", n_clicks=0,
+                                        style={"width": "100%", "padding": "9px", "marginTop": "4px",
+                                               "backgroundColor": COLORS["highlight"], "color": "#fff",
+                                               "border": "none", "borderRadius": "8px",
+                                               "fontSize": "13px", "fontWeight": "700",
+                                               "fontFamily": "Inter, Segoe UI, sans-serif",
+                                               "cursor": "pointer"}),
+                                    html.Div(id="search-result",
+                                             style={"fontSize": "12px", "color": COLORS["text"]}),
+                                ])]),
 
-                        html.Hr(style={"margin": "0", "border": "none",
-                                       "borderTop": f"1px solid {COLORS['border']}"}),
+                                # ── TAB: Planificaci\u00f3n Din\u00e1mica ──────────
+                                dcc.Tab(label="Din", value="dynamic",
+                                        style=TAB_STYLE, selected_style=TAB_SELECTED_STYLE,
+                                        children=[html.Div(
+                                style={"padding": "14px 16px", "display": "flex",
+                                       "flexDirection": "column", "gap": "10px"},
+                                children=[
+                                    html.H4("Planificaci\u00f3n din\u00e1mica",
+                                            style=SECTION_TITLE),
+                                    html.Div("Origen:", style={"fontSize": "12px", "fontWeight": "600",
+                                                               "color": COLORS["text"]}),
+                                    dcc.Input(id="dynamic-origin", type="text", placeholder="Ej: BOG",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Div("Presupuesto inicial (USD):", style={"fontSize": "12px",
+                                        "fontWeight": "600", "color": COLORS["text"]}),
+                                    dcc.Input(id="dynamic-budget", type="number", placeholder="Ej: 500",
+                                        style={"width": "100%", "padding": "8px", "borderRadius": "6px",
+                                               "border": f"1px solid {COLORS['border']}", "fontSize": "13px",
+                                               "boxSizing": "border-box"}),
+                                    html.Button("Iniciar viaje", id="dynamic-btn", n_clicks=0,
+                                        style={"width": "100%", "padding": "9px", "marginTop": "4px",
+                                               "backgroundColor": COLORS["ok"], "color": "#fff",
+                                               "border": "none", "borderRadius": "8px",
+                                               "fontSize": "13px", "fontWeight": "700",
+                                               "fontFamily": "Inter, Segoe UI, sans-serif",
+                                               "cursor": "pointer"}),
+                                    # Flight and job selectors (hidden until journey starts)
+                                    html.Div(id="dynamic-controls",
+                                             style={"display": "none"},
+                                             children=[
+                                        html.Div(id="dynamic-flight-section", children=[
+                                            html.Div(id="dynamic-origin-label",
+                                                     style={"fontSize": "12px", "fontWeight": "600",
+                                                            "color": COLORS["text"], "marginTop": "4px"}),
+                                            dcc.Dropdown(id="dynamic-flight-choice",
+                                                         options=[], placeholder="Vuelos disponibles...",
+                                                         style={"fontSize": "12px"}),
+                                            html.Button("Volar", id="dynamic-fly-btn", n_clicks=0,
+                                                style={"width": "100%", "padding": "7px", "marginTop": "4px",
+                                                       "backgroundColor": COLORS["hub"], "color": "#fff",
+                                                       "border": "none", "borderRadius": "6px",
+                                                       "fontSize": "12px", "fontWeight": "700",
+                                                       "fontFamily": "Inter, Segoe UI, sans-serif",
+                                                       "cursor": "pointer"}),
+                                        ]),
+                                        html.Div(id="dynamic-job-section",
+                                                 style={"display": "none"}, children=[
+                                            html.Hr(style={"margin": "8px 0", "border": "none",
+                                                           "borderTop": f"1px solid {COLORS['border']}"}),
+                                            html.Div("Trabajo en destino (opcional):",
+                                                     style={"fontSize": "12px", "fontWeight": "600",
+                                                            "color": COLORS["text"]}),
+                                            dcc.Dropdown(id="dynamic-job-choice",
+                                                         options=[], placeholder="Selecciona trabajo...",
+                                                         style={"fontSize": "12px"}),
+                                            dcc.Input(id="dynamic-hours", type="number",
+                                                      placeholder="Horas", min=0, max=24,
+                                                      style={"width": "100%", "padding": "6px",
+                                                             "borderRadius": "6px",
+                                                             "border": f"1px solid {COLORS['border']}",
+                                                             "fontSize": "12px",
+                                                             "boxSizing": "border-box",
+                                                             "marginTop": "4px"}),
+                                            html.Button("Trabajar", id="dynamic-work-btn", n_clicks=0,
+                                                style={"width": "100%", "padding": "7px", "marginTop": "4px",
+                                                       "backgroundColor": COLORS["secondary"], "color": "#fff",
+                                                       "border": "none", "borderRadius": "6px",
+                                                       "fontSize": "12px", "fontWeight": "700",
+                                                       "fontFamily": "Inter, Segoe UI, sans-serif",
+                                                       "cursor": "pointer"}),
+                                            html.Button("Continuar sin trabajar",
+                                                        id="dynamic-skip-btn", n_clicks=0,
+                                                style={"width": "100%", "padding": "7px", "marginTop": "4px",
+                                                       "backgroundColor": COLORS["bg_panel_2"],
+                                                       "color": COLORS["text"],
+                                                       "border": f"1px solid {COLORS['border']}",
+                                                       "borderRadius": "6px", "fontSize": "12px",
+                                                       "fontWeight": "600",
+                                                       "fontFamily": "Inter, Segoe UI, sans-serif",
+                                                       "cursor": "pointer"}),
+                                            html.Div(id="dynamic-status",
+                                                     style={"marginTop": "6px", "fontSize": "11px",
+                                                            "color": COLORS["text_dim"]}),
+                                        ]),
+                                    ]),
+                                    html.Div(id="dynamic-display",
+                                             style={"fontSize": "12px", "color": COLORS["text"],
+                                                    "marginTop": "4px"}),
+                                ])]),
 
-                        # ── Aircraft key ──────────────────────────────────────
-                        html.Div([
-                            html.H4("Tipos de aeronave", style=SECTION_TITLE),
-                            html.Div("C  ·  Avión Comercial", style={"fontSize": "12px", "color": COLORS["text_dim"], "marginBottom": "6px"}),
-                            html.Div("R  ·  Jet Regional",    style={"fontSize": "12px", "color": COLORS["text_dim"], "marginBottom": "6px"}),
-                            html.Div("H  ·  Avión de Hélice", style={"fontSize": "12px", "color": COLORS["text_dim"]}),
-                        ]),
-
-                        html.Hr(style={"margin": "0", "border": "none",
-                                       "borderTop": f"1px solid {COLORS['border']}"}),
-
-                        # ── Reset button: clears selection, shows the full graph ──
-                        html.Button(
-                            "↺  Ver todo el grafo",
-                            id="clear-selection",
-                            n_clicks=0,
-                            style={
-                                "width":           "100%",
-                                "padding":         "9px 12px",
-                                "backgroundColor": COLORS["bg_panel_2"],
-                                "color":           COLORS["text"],
-                                "border":          f"1px solid {COLORS['border']}",
-                                "borderRadius":    "8px",
-                                "fontSize":        "12px",
-                                "fontWeight":      "600",
-                                "fontFamily":      "Inter, Segoe UI, sans-serif",
-                                "cursor":          "pointer",
-                            },
+                            ],
                         ),
-
-                        # ── Airport detail card (filled on node click) ────────
-                        html.Div(id="airport-info", children=_placeholder()),
                     ],
                 ),
 
@@ -528,6 +790,7 @@ app.layout = html.Div(
     Output("stat-routes",    "children"),
     Output("stat-hubs",      "children"),
     Output("upload-status",  "children"),
+    Output("graph-data",     "data"),
     Input("upload-json",     "contents"),
     State("upload-json",     "filename"),
 )
@@ -553,14 +816,14 @@ def load_uploaded_json(contents, filename):
             f"✓  {filename}",
             style={"color": COLORS["ok"], "fontSize": "11px", "fontWeight": "600"},
         )
-        return (elems, str(n_airports), str(n_routes), str(n_hubs), status)
+        return (elems, str(n_airports), str(n_routes), str(n_hubs), status, data)
 
     except Exception as e:
         status = html.Span(
             f"Error al cargar el archivo: {e}",
             style={"color": COLORS["error"], "fontSize": "11px"},
         )
-        return [], "—", "—", "—", status
+        return [], "—", "—", "—", status, dash.no_update
 
 
 # ── Callback: switch the graph layout from the dropdown ───────────────────────
@@ -674,6 +937,491 @@ def _info_row(label, value):
         html.Span(f"{label}: ", style={"fontWeight": "700", "fontSize": "12px", "color": COLORS["text"]}),
         html.Span(value,        style={"fontSize": "12px", "color": COLORS["text_dim"]}),
     ]
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  R2.2 / R2.3 — Itinerary planning callbacks
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Helper: renders a service result (proposal-style) as HTML ────────────────
+def _result_card(result, accent_color):
+    if not result.get("success"):
+        return html.Div(
+            html.Span(f"⚠ {result.get('error', 'Unknown error')}"),
+            style={"color": COLORS["error"], "fontSize": "12px", "padding": "8px 0"},
+        )
+    if "note" in result:
+        return html.Div(
+            html.Span(result["note"]),
+            style={"color": COLORS["text_dim"], "fontSize": "12px", "padding": "8px 0",
+                    "fontStyle": "italic"},
+        )
+
+    path_str = " \u2192 ".join(result["path"])
+    seg_rows = []
+    for s in result["segments"]:
+        seg_rows.append(html.Tr([
+            html.Td(f"{s['origin']} \u2192 {s['destination']}",
+                    style={"padding": "2px 6px", "fontSize": "11px"}),
+            html.Td(s["aircraft"], style={"padding": "2px 6px", "fontSize": "11px"}),
+            html.Td(f"${s['cost']}", style={"padding": "2px 6px", "fontSize": "11px",
+                                             "textAlign": "right"}),
+            html.Td(f"{s['time_min']} min", style={"padding": "2px 6px", "fontSize": "11px",
+                                                    "textAlign": "right"}),
+        ]))
+
+    return html.Div([
+        html.Div(f"Destinos visitados: {result['destinations_visited']}",
+                 style={"fontWeight": "700", "fontSize": "13px", "color": accent_color,
+                        "marginBottom": "4px"}),
+        html.Div([
+            html.Span(f"Costo total: ${result['total_cost']}",
+                      style={"marginRight": "16px", "fontSize": "12px"}),
+            html.Span(f"Tiempo total: {result['total_time_hours']} h",
+                      style={"fontSize": "12px"}),
+        ], style={"marginBottom": "6px"}),
+        html.Div(f"Aeronaves: {', '.join(result['aircraft_used'])}",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"],
+                        "marginBottom": "8px"}),
+        html.Div(f"Ruta: {path_str}",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"],
+                        "marginBottom": "8px", "wordBreak": "break-all"}),
+        html.Table([
+            html.Thead(html.Tr([
+                html.Th("Segmento", style={"padding": "2px 6px", "fontSize": "11px",
+                                           "textAlign": "left", "color": COLORS["text_dim"]}),
+                html.Th("Aeronave", style={"padding": "2px 6px", "fontSize": "11px",
+                                           "textAlign": "left", "color": COLORS["text_dim"]}),
+                html.Th("Costo", style={"padding": "2px 6px", "fontSize": "11px",
+                                        "textAlign": "right", "color": COLORS["text_dim"]}),
+                html.Th("Tiempo", style={"padding": "2px 6px", "fontSize": "11px",
+                                         "textAlign": "right", "color": COLORS["text_dim"]}),
+            ])), html.Tbody(seg_rows)],
+            style={"width": "100%", "borderCollapse": "collapse",
+                   "border": f"1px solid {COLORS['border']}",
+                   "borderRadius": "6px", "overflow": "hidden"},
+        ),
+    ])
+
+
+# ── Helper: renders manual search results as HTML ──────────────────────────
+def _search_results_card(results):
+    cards = []
+    for r in results:
+        if not r["success"]:
+            cards.append(html.Div([
+                html.Div(r["criterion"].upper(),
+                         style={"fontWeight": "700", "fontSize": "12px", "color": COLORS["error"],
+                                "marginBottom": "4px"}),
+                html.Div(r.get("error", ""), style={"fontSize": "11px", "color": COLORS["text_dim"]}),
+            ], style={"marginBottom": "12px", "padding": "8px",
+                       "borderLeft": f"3px solid {COLORS['error']}",
+                       "backgroundColor": COLORS["bg_panel_2"],
+                       "borderRadius": "6px"}))
+            continue
+        path_str = " \u2192 ".join(r["path"])
+        seg_rows = []
+        for s in r["segments"]:
+            seg_rows.append(html.Tr([
+                html.Td(f"{s['origin']} \u2192 {s['destination']}",
+                        style={"padding": "2px 6px", "fontSize": "11px"}),
+                html.Td(s["aircraft"], style={"padding": "2px 6px", "fontSize": "11px"}),
+                html.Td(f"{s['distance_km']} km",
+                        style={"padding": "2px 6px", "fontSize": "11px", "textAlign": "right"}),
+                html.Td(str(s["weight"]),
+                        style={"padding": "2px 6px", "fontSize": "11px", "textAlign": "right"}),
+            ]))
+        cards.append(html.Div([
+            html.Div(r["criterion"].upper(),
+                     style={"fontWeight": "700", "fontSize": "12px", "color": COLORS["highlight"],
+                            "marginBottom": "4px"}),
+            html.Div(f"Ruta: {path_str}",
+                     style={"fontSize": "11px", "color": COLORS["text_dim"],
+                            "marginBottom": "6px", "wordBreak": "break-all"}),
+            html.Div(f"Peso total: {r['total_weight']}",
+                     style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "6px"}),
+            html.Table(
+                [html.Thead(html.Tr([
+                    html.Th("Segmento", style={"padding": "2px 6px", "fontSize": "11px",
+                                               "textAlign": "left", "color": COLORS["text_dim"]}),
+                    html.Th("Aeronave", style={"padding": "2px 6px", "fontSize": "11px",
+                                               "textAlign": "left", "color": COLORS["text_dim"]}),
+                    html.Th("Dist.", style={"padding": "2px 6px", "fontSize": "11px",
+                                            "textAlign": "right", "color": COLORS["text_dim"]}),
+                    html.Th("Peso", style={"padding": "2px 6px", "fontSize": "11px",
+                                           "textAlign": "right", "color": COLORS["text_dim"]}),
+                ])), html.Tbody(seg_rows)],
+                style={"width": "100%", "borderCollapse": "collapse",
+                       "border": f"1px solid {COLORS['border']}",
+                       "borderRadius": "6px", "overflow": "hidden"},
+            ),
+        ], style={"marginBottom": "12px", "padding": "8px",
+                   "borderLeft": f"3px solid {COLORS['highlight']}",
+                   "backgroundColor": COLORS["bg_panel_2"],
+                   "borderRadius": "6px"}))
+    return html.Div(cards)
+
+
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Callback: Proposal A — Max destinations by budget
+# ──────────────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("budget-result",   "children"),
+    Input("budget-btn",       "n_clicks"),
+    State("budget-origin",    "value"),
+    State("budget-amount",    "value"),
+    State("budget-time",      "value"),
+    State("budget-aircraft",  "value"),
+    State("graph-data",       "data"),
+)
+def calc_budget_route(n, origin, amount, time_limit, aircraft, graph_data):
+    if not n or not origin or not amount:
+        raise dash.exceptions.PreventUpdate
+    g = _build_graph_from_store(graph_data)
+    if g is None:
+        return html.Span("No hay datos de red.", style={"color": COLORS["error"]})
+    pref = set(aircraft) if aircraft else set()
+    t = float(time_limit) if time_limit else float("inf")
+    result = propose_max_coverage_by_budget(g, origin.upper(), float(amount), t, pref)
+    return _result_card(result, COLORS["hub"])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Callback: Proposal B — Max destinations by time
+# ──────────────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("time-result",     "children"),
+    Input("time-btn",         "n_clicks"),
+    State("time-origin",      "value"),
+    State("time-limit",       "value"),
+    State("time-budget",      "value"),
+    State("time-aircraft",    "value"),
+    State("graph-data",       "data"),
+)
+def calc_time_route(n, origin, limit, budget, aircraft, graph_data):
+    if not n or not origin or not limit:
+        raise dash.exceptions.PreventUpdate
+    g = _build_graph_from_store(graph_data)
+    if g is None:
+        return html.Span("No hay datos de red.", style={"color": COLORS["error"]})
+    pref = set(aircraft) if aircraft else set()
+    b = float(budget) if budget else float("inf")
+    result = propose_max_coverage_by_time(g, origin.upper(), float(limit), b, pref)
+    return _result_card(result, COLORS["secondary"])
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  Callback: Manual route search (Dijkstra multi-criteria)
+# ──────────────────────────────────────────────────────────────────────────────
+@app.callback(
+    Output("search-result",     "children"),
+    Input("search-btn",         "n_clicks"),
+    State("search-origin",      "value"),
+    State("search-dest",        "value"),
+    State("search-criteria",    "value"),
+    State("search-secondary",   "value"),
+    State("search-aircraft",    "value"),
+    State("graph-data",         "data"),
+)
+def calc_manual_search(n, origin, dest, criteria, include_sec, aircraft, graph_data):
+    if not n or not origin or not dest or not criteria:
+        raise dash.exceptions.PreventUpdate
+    g = _build_graph_from_store(graph_data)
+    if g is None:
+        return html.Span("No hay datos de red.", style={"color": COLORS["error"]})
+    pref = set(aircraft) if aircraft else set()
+    sec = include_sec if include_sec is not None else True
+    results = find_best_routes(g, origin.upper(), dest.upper(), criteria, sec, pref)
+    return _search_results_card(results)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+#  Dynamic Itinerary (R2.3) — multi-callback state machine
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _get_available_flights_for(vertex, visited, aircraft_config, budget, free_km=0.0, total_km=0.0):
+    from services.dynamicService import _edge_cost, _edge_time
+    options = []
+    for edge in vertex.adjacencies:
+        dest_id = edge.destination_vertex.id
+        if dest_id in visited:
+            continue
+
+        new_total = total_km + edge.distance_km
+        new_free = free_km + (edge.distance_km if edge.base_cost == 0 else 0)
+        if edge.base_cost == 0 and total_km > 0 and new_free > 0.20 * new_total:
+            continue
+
+        for aircraft in edge.aircraft:
+            cost = _edge_cost(edge, aircraft, aircraft_config)
+            if cost <= budget:
+                options.append({
+                    "label": f"{dest_id}  |  {aircraft}  |  ${cost:.2f}  |  {_edge_time(edge, aircraft, aircraft_config):.0f} min",
+                    "value": json.dumps({
+                        "dest": dest_id,
+                        "aircraft": aircraft,
+                        "cost": round(cost, 2),
+                        "time_min": round(_edge_time(edge, aircraft, aircraft_config), 2),
+                        "distance_km": edge.distance_km,
+                        "origin": vertex.id,
+                        "base_cost": edge.base_cost,
+                    }),
+                })
+    return options
+
+
+def _get_jobs_for(vertex):
+    if not vertex or not vertex.jobs:
+        return []
+    return [
+        {"label": f"{j['name']}  (${j['hourlyRate']}/h, max {j['maxHours']}h)",
+         "value": json.dumps(j)}
+        for j in vertex.jobs
+    ]
+
+
+def _dynamic_display_state(state):
+    if state is None:
+        return html.P("Presiona 'Iniciar viaje' para comenzar.",
+                      style={"color": COLORS["text_dim"], "fontSize": "12px"})
+    segs = state.get("segments", [])
+    parts = []
+    if segs:
+        path = [s["origin"] for s in segs] + [segs[-1]["destination"]]
+        parts.append(html.Div(f"Ruta: {' → '.join(path)}",
+                     style={"fontSize": "11px", "color": COLORS["text_dim"],
+                            "marginBottom": "4px", "wordBreak": "break-all"}))
+    parts.append(html.Div(f"Presupuesto restante: ${state['budget']:.2f}",
+                 style={"fontSize": "12px", "fontWeight": "600", "marginBottom": "2px"}))
+    parts.append(html.Div(f"Tiempo transcurrido: {state['time_min']:.0f} min",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"], "marginBottom": "2px"}))
+    if state.get("money_earned", 0) > 0:
+        parts.append(html.Div(f"Ganado en trabajos: ${state['money_earned']:.2f}",
+                     style={"fontSize": "11px", "color": COLORS["ok"]}))
+    return html.Div(parts)
+
+
+def _dynamic_summary(state):
+    segs = state.get("segments", [])
+    path = [s["origin"] for s in segs] + [segs[-1]["destination"]] if segs else [state["current_id"]]
+    return html.Div([
+        html.Div("✈ Viaje completo", style={"fontWeight": "700", "fontSize": "14px",
+                                            "color": COLORS["ok"], "marginBottom": "8px"}),
+        html.Div(f"Destinos visitados: {len(segs)}",
+                 style={"fontSize": "12px", "marginBottom": "4px"}),
+        html.Div(f"Costo total: ${sum(s['cost'] for s in segs):.2f}",
+                 style={"fontSize": "12px", "marginBottom": "4px"}),
+        html.Div(f"Tiempo total: {state['time_min']:.0f} min",
+                 style={"fontSize": "12px", "marginBottom": "4px"}),
+        html.Div(f"Ganado en trabajos: ${state.get('money_earned', 0):.2f}",
+                 style={"fontSize": "12px", "marginBottom": "4px", "color": COLORS["ok"]}),
+        html.Div(f"Aeronaves usadas: {', '.join(state.get('aircraft_used', []))}",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"], "marginBottom": "4px"}),
+        html.Div(f"Ruta: {' → '.join(path)}",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"], "wordBreak": "break-all"}),
+    ])
+
+
+# ── Callback 1: Start journey ──────────────────────────────────────────────
+@app.callback(
+    Output("dynamic-state",      "data"),
+    Output("dynamic-display",    "children"),
+    Output("dynamic-controls",   "style"),
+    Output("dynamic-flight-choice", "options"),
+    Output("dynamic-flight-choice", "value"),
+    Output("dynamic-origin-label", "children"),
+    Input("dynamic-btn",         "n_clicks"),
+    State("dynamic-origin",      "value"),
+    State("dynamic-budget",      "value"),
+    State("graph-data",          "data"),
+)
+def dynamic_start(btn, origin, budget, graph_data):
+    if not origin or not budget:
+        return (None,
+                html.Span("Completa origen y presupuesto.", style={"color": COLORS["error"]}),
+                {"display": "none"}, [], None, "Selecciona vuelo:")
+
+    state = {
+        "current_id": origin.strip().upper(),
+        "budget": float(budget),
+        "time_min": 0.0,
+        "visited": [origin.strip().upper()],
+        "segments": [],
+        "aircraft_used": [],
+        "money_earned": 0.0,
+        "free_km": 0.0,
+        "total_km": 0.0,
+    }
+
+    g = _build_graph_from_store(graph_data)
+    if g is None:
+        return None, html.Span("No hay datos de red.", style={"color": COLORS["error"]}), {"display": "none"}, [], None, "Selecciona vuelo:"
+
+    vertex = g.get_vertex(state["current_id"])
+    if vertex is None:
+        return None, html.Span(f"Aeropuerto desconocido: {state['current_id']}",
+                               style={"color": COLORS["error"]}), {"display": "none"}, [], None, "Selecciona vuelo:"
+
+    options = _get_available_flights_for(vertex, set(state["visited"]), g.aircraft_config, state["budget"],
+                                         state["free_km"], state["total_km"])
+    if not options:
+        return (None,
+                html.Div([_dynamic_display_state(state),
+                         html.Div("No hay vuelos disponibles desde el origen.",
+                                  style={"color": COLORS["text_dim"], "fontSize": "12px", "marginTop": "8px"})]),
+                {"display": "none"}, [], None,
+                f"Vuelos desde {vertex.city} ({vertex.id}):")
+
+    return (state, _dynamic_display_state(state),
+            {"display": "block", "padding": "0"}, options, None,
+            f"Vuelos desde {vertex.city} ({vertex.id}):")
+
+
+# ── Callback 2: Fly ────────────────────────────────────────────────────────
+@app.callback(
+    Output("dynamic-state",       "data",  allow_duplicate=True),
+    Output("dynamic-display",     "children", allow_duplicate=True),
+    Output("dynamic-flight-choice", "options", allow_duplicate=True),
+    Output("dynamic-flight-choice", "value",  allow_duplicate=True),
+    Output("dynamic-job-choice",  "options"),
+    Output("dynamic-job-choice",  "value"),
+    Output("dynamic-job-section", "style", allow_duplicate=True),
+    Output("dynamic-status",      "children"),
+    Input("dynamic-fly-btn",      "n_clicks"),
+    State("dynamic-flight-choice", "value"),
+    State("dynamic-state",        "data"),
+    State("graph-data",           "data"),
+    prevent_initial_call=True,
+)
+def dynamic_fly(btn, flight_json, state, graph_data):
+    if not flight_json or state is None:
+        raise dash.exceptions.PreventUpdate
+
+    opt = json.loads(flight_json)
+    g = _build_graph_from_store(graph_data)
+    if g is None:
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, [], None, dash.no_update, html.Span("Error: no hay datos de red.", style={"color": COLORS["error"]})
+
+    # Process flight
+    state["budget"] -= opt["cost"]
+    state["time_min"] += opt["time_min"]
+    state["visited"].append(opt["dest"])
+    state["current_id"] = opt["dest"]
+    state["aircraft_used"].append(opt["aircraft"])
+    state["total_km"] += opt["distance_km"]
+    if opt.get("base_cost", 1) == 0:
+        state["free_km"] += opt["distance_km"]
+    state["segments"].append({
+        "origin": opt["origin"],
+        "destination": opt["dest"],
+        "aircraft": opt["aircraft"],
+        "distance_km": opt["distance_km"],
+        "cost": opt["cost"],
+        "time_min": opt["time_min"],
+    })
+
+    # Get jobs at destination
+    dest_v = g.get_vertex(opt["dest"])
+    jobs = _get_jobs_for(dest_v)
+
+    status = html.Div([
+        html.Div(f"✅ {opt['origin']} → {opt['dest']} completado",
+                 style={"fontWeight": "600", "fontSize": "12px", "color": COLORS["ok"],
+                        "marginBottom": "4px"}),
+        html.Div(f"Aeronave: {opt['aircraft']}  |  Costo: ${opt['cost']}  |  Tiempo: {opt['time_min']} min",
+                 style={"fontSize": "11px", "marginBottom": "2px"}),
+        html.Div(f"Presupuesto restante: ${state['budget']:.2f}",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"]}),
+    ])
+
+    return state, _dynamic_display_state(state), [], None, jobs, None, {"display": "block"}, status
+
+
+# ── Callback 3: Work ───────────────────────────────────────────────────────
+@app.callback(
+    Output("dynamic-state",      "data",  allow_duplicate=True),
+    Output("dynamic-status",     "children", allow_duplicate=True),
+    Input("dynamic-work-btn",    "n_clicks"),
+    State("dynamic-job-choice",  "value"),
+    State("dynamic-hours",       "value"),
+    State("dynamic-state",       "data"),
+    prevent_initial_call=True,
+)
+def dynamic_work(btn, job_json, hours, state):
+    if not job_json or not hours or state is None:
+        raise dash.exceptions.PreventUpdate
+
+    job = json.loads(job_json)
+    hours = float(hours)
+    max_h = job.get("maxHours", 0)
+    if hours > max_h:
+        return state, html.Span(f"Máximo {max_h} horas. No se trabajó.",
+                                style={"color": COLORS["error"], "fontSize": "11px"})
+
+    earned = hours * job["hourlyRate"]
+    state["budget"] += earned
+    state["money_earned"] = state.get("money_earned", 0) + earned
+
+    return state, html.Div([
+        html.Div(f"💰 Trabajaste {hours}h como {job['name']} y ganaste ${earned:.2f}",
+                 style={"fontWeight": "600", "fontSize": "12px", "color": COLORS["ok"],
+                        "marginBottom": "2px"}),
+        html.Div(f"Nuevo presupuesto: ${state['budget']:.2f}",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"]}),
+    ])
+
+
+# ── Callback 4: Skip / advance ────────────────────────────────────────────
+@app.callback(
+    Output("dynamic-display",       "children", allow_duplicate=True),
+    Output("dynamic-flight-choice", "options",  allow_duplicate=True),
+    Output("dynamic-flight-choice", "value",    allow_duplicate=True),
+    Output("dynamic-job-choice",    "options",  allow_duplicate=True),
+    Output("dynamic-job-choice",    "value",    allow_duplicate=True),
+    Output("dynamic-hours",         "value"),
+    Output("dynamic-job-section",   "style", allow_duplicate=True),
+    Output("dynamic-origin-label",  "children", allow_duplicate=True),
+    Output("dynamic-status",        "children", allow_duplicate=True),
+    Input("dynamic-skip-btn",       "n_clicks"),
+    State("dynamic-state",          "data"),
+    State("graph-data",             "data"),
+    prevent_initial_call=True,
+)
+def dynamic_skip(btn, state, graph_data):
+    if state is None:
+        raise dash.exceptions.PreventUpdate
+
+    g = _build_graph_from_store(graph_data)
+    if g is None:
+        return (html.Span("No hay datos de red.", style={"color": COLORS["error"]}),
+                [], None, [], None, None, {"display": "none"}, "")
+
+    vertex = g.get_vertex(state["current_id"])
+    if vertex is None:
+        return (html.Span(f"Aeropuerto desconocido: {state['current_id']}",
+                          style={"color": COLORS["error"]}), [], None, [], None, None, {"display": "none"}, "")
+
+    options = _get_available_flights_for(vertex, set(state["visited"]), g.aircraft_config, state["budget"],
+                                         state.get("free_km", 0.0), state.get("total_km", 0.0))
+    if not options:
+        return (_dynamic_summary(state), [], None, [], None, None, {"display": "none"}, "")
+
+    # Show "Nuevo origen" banner with next routes
+    nuevo_origen = html.Div([
+        html.Div(f"Ubicación Actual: {state['current_id']}",
+                 style={"fontWeight": "700", "fontSize": "13px", "color": COLORS["hub"],
+                        "marginTop": "8px", "marginBottom": "4px"}),
+        html.Div("Selecciona tu siguiente vuelo:",
+                 style={"fontSize": "11px", "color": COLORS["text_dim"], "marginBottom": "4px"}),
+    ])
+    display = html.Div([_dynamic_display_state(state), nuevo_origen])
+
+    return (display, options, None, [], None, None, {"display": "none"},
+            html.Span("Vuelos disponibles.", style={"color": COLORS["text_dim"], "fontSize": "11px"}))
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────

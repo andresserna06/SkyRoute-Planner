@@ -54,9 +54,11 @@ def _edge_time(edge, aircraft, aircraft_config):
 def _dfs_max_coverage(graph, current_id, visited, budget_spent, time_spent,
                       budget_limit, time_limit_mins, aircraft_used, segments,
                       criterion, aircraft_config, preferred_set,
-                      all_aircraft_types=None):
+                      all_aircraft_types=None,
+                      subsidized_km=0.0, total_km=0.0):
     # DFS with pruning: returns (destinations_count, segments, budget, time, aircraft_set)
     # Prioritises solutions that use all aircraft types (R2.2 transport diversity)
+    # Enforces max 20% distance on subsidized routes (base_cost == 0)
     if all_aircraft_types is None:
         all_aircraft_types = set()
 
@@ -79,6 +81,13 @@ def _dfs_max_coverage(graph, current_id, visited, budget_spent, time_spent,
 
         ec = _edge_cost(edge, chosen, aircraft_config)
         et = _edge_time(edge, chosen, aircraft_config)
+
+        new_total = total_km + edge.distance_km
+        new_subsidized = subsidized_km + (edge.distance_km if edge.base_cost == 0 else 0)
+
+        # 20% subsidized route limit (only for subsidized segments, and only after first segment)
+        if edge.base_cost == 0 and total_km > 0 and new_subsidized > 0.20 * new_total:
+            continue
 
         new_budget = budget_spent + ec
         new_time = time_spent + et
@@ -109,6 +118,7 @@ def _dfs_max_coverage(graph, current_id, visited, budget_spent, time_spent,
             new_aircraft, new_segments,
             criterion, aircraft_config, preferred_set,
             all_aircraft_types,
+            new_subsidized, new_total,
         )
 
         # Priority: aircraft diversity > destinations > resource consumption

@@ -6,11 +6,20 @@ from services.itineraryService import _edge_cost, _edge_time
 
 def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget):
     # Return list of (edge, aircraft, cost, time) for affordable flights from vertex
+    # Enforces max 20% distance on subsidized routes (base_cost == 0)
     options = []
     for edge in vertex.adjacencies:
         dest_id = edge.destination_vertex.id
         if dest_id in visited:
             continue
+
+        # Check 20% subsidized route limit (only for subsidized segments, and only after first segment)
+        if edge.base_cost == 0 and total_km > 0:
+            new_total = total_km + edge.distance_km
+            new_free = free_km + edge.distance_km
+            if new_free > 0.20 * new_total:
+                continue
+
         for aircraft in edge.aircraft:
             cost = _edge_cost(edge, aircraft, aircraft_config)
             time_min = _edge_time(edge, aircraft, aircraft_config)

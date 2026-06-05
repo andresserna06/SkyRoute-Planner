@@ -1,4 +1,14 @@
 {
+  "config": {
+    "aircraft": {
+      "Avión Comercial":  { "costPerKm": 0.18, "timePerKm": 0.7  },
+      "Jet Regional":     { "costPerKm": 0.25, "timePerKm": 1.1  },
+      "Avión de Hélice":  { "costPerKm": 0.12, "timePerKm": 2.5  }
+    },
+    "budgetThresholdPercent": 35,
+    "accommodationIntervalHours": 20,
+    "foodIntervalHours": 8
+  },
 
   "nodes": [
     {
