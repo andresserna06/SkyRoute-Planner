@@ -1,185 +1,277 @@
-# dynamicService.py — R2.3: interactive step-by-step planner where the traveler
-# chooses aircraft per segment and can work at airports to earn more budget
+# dynamicService.py — R3: pure-function step-by-step planner (no I/O).
+# All state transitions take a state dict and return a new state dict.
+# The web dashboard calls these functions from its callbacks.
 
 from services.itineraryService import _edge_cost, _edge_time
 
 
-def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget):
-    # Return list of (edge, aircraft, cost, time) for affordable flights from vertex
+# ── Journey state initializer ─────────────────────────────────────────────────
+
+def init_journey_state(origin_id, initial_budget, threshold_pct=35):
+    return {
+        "current_id":          origin_id,
+        "budget":              float(initial_budget),
+        "initial_budget":      float(initial_budget),
+        "threshold_pct":       threshold_pct,
+        "time_min":            0.0,
+        "visited":             [origin_id],
+        "segments":            [],
+        "aircraft_used":       [],
+        "jobs_taken":          [],
+        "money_earned":        0.0,
+        "subsidized_km":       0.0,
+        "total_km":            0.0,
+        "destination_details": [],
+        "activities_done":     [],
+        "phase":               "flying",   # flying | arrival | complete
+        "arrival_data":        None,
+    }
+
+
+# ── Read-only queries (do not mutate state) ───────────────────────────────────
+
+def get_flight_options(graph, state):
+    vertex = graph.get_vertex(state["current_id"])
+    if vertex is None:
+        return []
+    visited_set = set(state["visited"])
     options = []
     for edge in vertex.adjacencies:
         dest_id = edge.destination_vertex.id
-        if dest_id in visited:
+        if dest_id in visited_set:
             continue
         for aircraft in edge.aircraft:
-            cost = _edge_cost(edge, aircraft, aircraft_config)
-            time_min = _edge_time(edge, aircraft, aircraft_config)
-            if cost <= budget:
-                options.append((edge, aircraft, cost, time_min))
+            cost     = _edge_cost(edge, aircraft, graph.aircraft_config,
+                                  state["subsidized_km"], state["total_km"])
+            time_min = _edge_time(edge, aircraft, graph.aircraft_config)
+            if cost <= state["budget"]:
+                options.append({
+                    "destination":   dest_id,
+                    "dest_name":     edge.destination_vertex.name,
+                    "aircraft":      aircraft,
+                    "cost":          round(cost, 2),
+                    "time_min":      round(time_min, 2),
+                    "distance_km":   edge.distance_km,
+                    "is_subsidized": edge.base_cost == 0,
+                    "is_free":       edge.base_cost == 0 and cost == 0.0,
+                })
     return options
 
 
-def _display_flights(origin_id, options):
-    # Print available flights with aircraft, cost and time
-    print(f"\n  Flights from {origin_id}:")
-    print(f"  {'#':<3} {'Destination':<12} {'Aircraft':<22} {'Cost (USD)':<12} {'Time (min)':<10}")
-    print(f"  {'-'*3} {'-'*12} {'-'*22} {'-'*12} {'-'*10}")
-    for i, (edge, aircraft, cost, time_min) in enumerate(options):
-        dest = edge.destination_vertex.id
-        print(f"  {i+1:<3} {dest:<12} {aircraft:<22} {cost:<12.2f} {time_min:<10.0f}")
-
-
-def _display_jobs(vertex):
-    # Print available jobs at the current airport
-    if not vertex.jobs:
+def get_available_jobs(graph, state):
+    budget_pct = (state["budget"] / state["initial_budget"]) * 100
+    if budget_pct >= state["threshold_pct"]:
         return []
-    print(f"\n  Available jobs at {vertex.id}:")
-    print(f"  {'#':<3} {'Job':<28} {'Hourly Rate':<14} {'Max Hours':<10}")
-    print(f"  {'-'*3} {'-'*28} {'-'*14} {'-'*10}")
-    for i, job in enumerate(vertex.jobs):
-        print(f"  {i+1:<3} {job['name']:<28} ${job['hourlyRate']:<11.2f} {job['maxHours']:<10}")
-    return vertex.jobs
+    vertex = graph.get_vertex(state["current_id"])
+    return vertex.jobs if vertex and vertex.jobs else []
 
 
-def run_dynamic_itinerary(graph, origin_id, initial_budget):
-    # Interactive loop: show flights -> traveller picks -> work at destination -> repeat
-    current = graph.get_vertex(origin_id)
-    if current is None:
-        return {"success": False, "error": f"Unknown origin: {origin_id}"}
+# ── State transitions ─────────────────────────────────────────────────────────
 
-    state = {
-        "current_id": origin_id,
-        "budget": initial_budget,
-        "time_min": 0.0,
-        "visited": {origin_id},
-        "segments": [],
-        "aircraft_used": set(),
-        "free_km": 0.0,
-        "total_km": 0.0,
-        "jobs_taken": [],
-        "money_earned": 0.0,
-    }
+def apply_flight(graph, state, dest_id, aircraft):
+    # Find the matching edge
+    vertex = graph.get_vertex(state["current_id"])
+    edge = next(
+        (e for e in vertex.adjacencies
+         if e.destination_vertex.id == dest_id and aircraft in e.aircraft),
+        None,
+    )
+    if edge is None:
+        return state
 
-    print(f"\n{'='*60}")
-    print(f"  DYNAMIC ITINERARY PLANNER (R2.3)")
-    print(f"  Origin: {origin_id}  |  Initial budget: ${initial_budget:.2f}")
-    print(f"{'='*60}")
+    cost     = _edge_cost(edge, aircraft, graph.aircraft_config,
+                          state["subsidized_km"], state["total_km"])
+    time_min = _edge_time(edge, aircraft, graph.aircraft_config)
 
-    while True:
-        vertex = graph.get_vertex(state["current_id"])
-        options = _list_available_flights(
-            vertex, state["visited"],
-            graph.aircraft_config,
-            state["free_km"], state["total_km"],
-            state["budget"],
-        )
+    new_aircraft = list(state["aircraft_used"])
+    if aircraft not in new_aircraft:
+        new_aircraft.append(aircraft)
 
-        if not options:
-            print(f"\n  No affordable flights from {state['current_id']}. Journey complete.")
-            break
-
-        _display_flights(state["current_id"], options)
-
-        # Traveller picks a flight
-        try:
-            choice = input(f"\n  Choose flight (1-{len(options)}) or 0 to stop: ").strip()
-            if choice == "0":
-                print("  Journey ended by choice.")
-                break
-            idx = int(choice) - 1
-            if idx < 0 or idx >= len(options):
-                print("  Invalid choice.")
-                continue
-        except (ValueError, EOFError, KeyboardInterrupt):
-            print("  Invalid input.")
-            continue
-
-        edge, chosen_aircraft, cost, time_min = options[idx]
-        dest_id = edge.destination_vertex.id
-
-        # Update state
-        state["budget"] -= cost
-        state["time_min"] += time_min
-        state["visited"].add(dest_id)
-        state["aircraft_used"].add(chosen_aircraft)
-        state["total_km"] += edge.distance_km
-        if edge.base_cost == 0:
-            state["free_km"] += edge.distance_km
-
-        state["segments"].append({
-            "origin": state["current_id"],
+    new_state = {
+        **state,
+        "budget":        round(state["budget"] - cost, 2),
+        "time_min":      state["time_min"] + time_min,
+        "total_km":      state["total_km"] + edge.distance_km,
+        "subsidized_km": state["subsidized_km"] + (edge.distance_km if edge.base_cost == 0 and cost == 0.0 else 0),
+        "visited":       state["visited"] + [dest_id],
+        "aircraft_used": new_aircraft,
+        "segments":      state["segments"] + [{
+            "origin":      state["current_id"],
             "destination": dest_id,
-            "aircraft": chosen_aircraft,
+            "aircraft":    aircraft,
             "distance_km": edge.distance_km,
-            "cost": round(cost, 2),
-            "time_min": round(time_min, 2),
-        })
-        state["current_id"] = dest_id
+            "cost":        round(cost, 2),
+            "time_min":    round(time_min, 2),
+        }],
+        "current_id":    dest_id,
+        "phase":         "arrival",
+        "arrival_data":  _build_arrival_data(edge, edge.destination_vertex),
+    }
+    return new_state
 
-        # Show updated status
-        print(f"\n  >>> {state['segments'][-1]['origin']} → {dest_id}")
-        print(f"      Aircraft: {chosen_aircraft}")
-        print(f"      Cost: ${cost:.2f}  |  Time: {time_min:.0f} min")
-        print(f"      Remaining budget: ${state['budget']:.2f}")
 
-        # Offer jobs at destination
-        dest_vertex = graph.get_vertex(dest_id)
-        jobs = _display_jobs(dest_vertex)
+def apply_arrival(state):
+    # Charge stay costs + mandatory activities, transition to flying phase.
+    arrival = state["arrival_data"]
+    if not arrival:
+        return {**state, "phase": "flying"}
 
-        if jobs:
-            try:
-                work = input(f"\n  Work at {dest_id}? (y/n): ").strip().lower()
-                if work == "y":
-                    print(f"  Choose a job (1-{len(jobs)}):")
-                    job_choice = int(input("  Choose job: ")) - 1
-                    if 0 <= job_choice < len(jobs):
-                        hours = float(input("  Hours to work: "))
-                        max_h = jobs[job_choice]["maxHours"]
-                        if hours <= max_h:
-                            earned = hours * jobs[job_choice]["hourlyRate"]
-                            state["budget"] += earned
-                            state["money_earned"] += earned
-                            state["jobs_taken"].append({
-                                "airport": dest_id,
-                                "job": jobs[job_choice]["name"],
-                                "hours": hours,
-                                "earned": earned,
-                            })
-                            print(f"  Earned ${earned:.2f}. New budget: ${state['budget']:.2f}")
-                        else:
-                            print(f"  Max {max_h} hours. No work taken.")
-            except (ValueError, EOFError, KeyboardInterrupt):
-                print("  Invalid input. Continuing without work.")
+    stay_days     = arrival["stay_days"]
+    accommodation = arrival["accommodation"]
+    food          = arrival["food"]
+    stay_cost     = accommodation + food
 
-    # Build summary
-    summary = {
-        "success": True,
-        "origin": origin_id,
-        "destinations_visited": len(state["visited"]) - 1,
-        "segments": state["segments"],
-        "total_cost": round(initial_budget - state["budget"], 2),
-        "total_time_hours": round(state["time_min"] / 60.0, 2),
-        "aircraft_used": list(state["aircraft_used"]),
-        "path": [origin_id] + [s["destination"] for s in state["segments"]],
-        "jobs_taken": state["jobs_taken"],
-        "money_earned": round(state["money_earned"], 2),
+    new_budget   = round(state["budget"] - stay_cost, 2)
+    new_time_min = state["time_min"] + stay_days * 24 * 60
+
+    dest_record = {
+        "id":                arrival["id"],
+        "name":              arrival["name"],
+        "city":              arrival["city"],
+        "country":           arrival["country"],
+        "stay_days":         stay_days,
+        "accommodation":     accommodation,
+        "food":              food,
+        "activity_cost":     0.0,
+        "activity_time_min": 0,
+        "activities_done":   [],
+        "total_cost":        stay_cost,
     }
 
-    print(f"\n{'='*60}")
-    print(f"  ITINERARY COMPLETE")
-    print(f"{'='*60}")
-    print(f"  Destinations visited : {summary['destinations_visited']}")
-    print(f"  Total cost (USD)    : {summary['total_cost']}")
-    print(f"  Total time (hours)  : {summary['total_time_hours']}")
-    print(f"  Money earned (jobs) : {summary['money_earned']}")
-    print(f"  Aircraft used       : {', '.join(summary['aircraft_used']) if summary['aircraft_used'] else 'None'}")
-    print(f"  Path                : {' → '.join(summary['path'])}")
-    if summary["segments"]:
-        print(f"\n  {'Segment':<35} {'Aircraft':<20} {'Cost':<10} {'Time(min)':<10}")
-        print(f"  {'-'*35} {'-'*20} {'-'*10} {'-'*10}")
-        for s in summary["segments"]:
-            seg_str = f"{s['origin']} → {s['destination']}"
-            print(f"  {seg_str:<35} {s['aircraft']:<20} {s['cost']:<10} {s['time_min']:<10}")
-    print()
+    new_activities = list(state["activities_done"])
+    for act in arrival.get("mandatory_activities", []):
+        cost    = act.get("costUSD", 0)
+        dur_min = act.get("durationMin", 0)
+        new_budget   -= cost
+        new_time_min += dur_min
+        record = {"airport": arrival["id"], "name": act["name"], "type": "obligatoria",
+                  "duration_min": dur_min, "cost": cost}
+        dest_record["activity_cost"]     += cost
+        dest_record["activity_time_min"] += dur_min
+        dest_record["total_cost"]        += cost
+        dest_record["activities_done"].append(record)
+        new_activities.append(record)
 
-    return summary
+    dest_record["activity_cost"] = round(dest_record["activity_cost"], 2)
+    dest_record["total_cost"]    = round(dest_record["total_cost"], 2)
+
+    return {
+        **state,
+        "budget":              round(new_budget, 2),
+        "time_min":            new_time_min,
+        "destination_details": state["destination_details"] + [dest_record],
+        "activities_done":     new_activities,
+        "phase":               "flying",
+    }
+
+
+def apply_optional_activities(state, selected_indices):
+    # selected_indices: list of ints (0-based) into arrival_data["optional_activities"]
+    arrival  = state["arrival_data"]
+    optional = arrival.get("optional_activities", []) if arrival else []
+
+    new_budget   = state["budget"]
+    new_time_min = state["time_min"]
+    new_activities = list(state["activities_done"])
+    new_details    = list(state["destination_details"])
+    last = dict(new_details[-1]) if new_details else None
+
+    for idx in selected_indices:
+        if idx < 0 or idx >= len(optional):
+            continue
+        act  = optional[idx]
+        cost = act.get("costUSD", 0)
+        dur  = act.get("durationMin", 0)
+        if cost > new_budget:
+            continue
+        new_budget   -= cost
+        new_time_min += dur
+        record = {"airport": arrival["id"], "name": act["name"], "type": "opcional",
+                  "duration_min": dur, "cost": cost}
+        new_activities.append(record)
+        if last is not None:
+            last = {**last,
+                    "activity_cost":     round(last["activity_cost"] + cost, 2),
+                    "activity_time_min": last["activity_time_min"] + dur,
+                    "total_cost":        round(last["total_cost"] + cost, 2),
+                    "activities_done":   last["activities_done"] + [record]}
+
+    if last is not None:
+        new_details[-1] = last
+
+    return {
+        **state,
+        "budget":              round(new_budget, 2),
+        "time_min":            new_time_min,
+        "activities_done":     new_activities,
+        "destination_details": new_details,
+        "phase":               "flying",
+    }
+
+
+def apply_job(graph, state, job_idx, hours):
+    jobs = get_available_jobs(graph, state)
+    if not jobs or job_idx < 0 or job_idx >= len(jobs):
+        return state
+    job = jobs[job_idx]
+    hours = float(hours)
+    if hours <= 0 or hours > job["maxHours"]:
+        return state
+    earned = round(hours * job["hourlyRate"], 2)
+    return {
+        **state,
+        "budget":       round(state["budget"] + earned, 2),
+        "time_min":     state["time_min"] + hours * 60,
+        "money_earned": round(state["money_earned"] + earned, 2),
+        "jobs_taken":   state["jobs_taken"] + [{
+            "airport": state["current_id"],
+            "job":     job["name"],
+            "hours":   hours,
+            "earned":  earned,
+        }],
+    }
+
+
+def finish_journey(state):
+    return {**state, "phase": "complete"}
+
+
+def build_summary(state):
+    initial = state["initial_budget"]
+    return {
+        "success":              True,
+        "origin":               state["visited"][0] if state["visited"] else "",
+        "initial_budget":       initial,
+        "destinations_visited": len(state["visited"]) - 1,
+        "destination_details":  state["destination_details"],
+        "segments":             state["segments"],
+        "activities_done":      state["activities_done"],
+        "total_cost":           round(initial - state["budget"], 2),
+        "total_time_hours":     round(state["time_min"] / 60.0, 2),
+        "aircraft_used":        state["aircraft_used"],
+        "path":                 state["visited"],
+        "jobs_taken":           state["jobs_taken"],
+        "money_earned":         state["money_earned"],
+        "budget_remaining":     state["budget"],
+        "subsidized_km":        round(state["subsidized_km"], 2),
+        "total_km":             round(state["total_km"], 2),
+    }
+
+
+# ── Internal helper ───────────────────────────────────────────────────────────
+
+def _build_arrival_data(edge, dest_vertex):
+    stay_days = edge.minimum_stay
+    return {
+        "id":                   dest_vertex.id,
+        "name":                 dest_vertex.name,
+        "city":                 dest_vertex.city,
+        "country":              dest_vertex.country,
+        "stay_days":            stay_days,
+        "accommodation":        round(dest_vertex.accommodation_cost * stay_days, 2),
+        "food":                 round(dest_vertex.food_cost * stay_days, 2),
+        "mandatory_activities": [a for a in (dest_vertex.activities or [])
+                                 if a.get("type") == "obligatoria"],
+        "optional_activities":  [a for a in (dest_vertex.activities or [])
+                                 if a.get("type") != "obligatoria"],
+    }

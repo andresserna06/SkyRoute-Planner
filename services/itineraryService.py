@@ -30,13 +30,19 @@ def _pick_aircraft(edge, criterion, aircraft_config, preferred_set):
     return min(valid, key=key)
 
 
-def _edge_cost(edge, aircraft, aircraft_config):
-    # Cost = distance_km * cost_per_km
-    # Subsidised routes (base_cost == 0): 20% free, 80% charged
+def _edge_cost(edge, aircraft, aircraft_config, subsidized_km=0.0, total_km=0.0):
+    # Cost = distance_km * cost_per_km.
+    # Subsidised routes (base_cost == 0) are free unless the traveler has already
+    # used subsidised routes for more than 20 % of total distance traveled —
+    # in that case the segment is charged at full price.
     cost_per_km = aircraft_config[aircraft]["costPerKm"]
 
     if edge.base_cost == 0:
-        return edge.distance_km * 0.80 * cost_per_km
+        projected_sub   = subsidized_km + edge.distance_km
+        projected_total = total_km + edge.distance_km
+        if projected_total > 0 and projected_sub / projected_total > 0.20:
+            return edge.distance_km * cost_per_km  # limit exceeded — full price
+        return 0.0  # within the 20 % allowance — free
 
     return edge.distance_km * cost_per_km
 
