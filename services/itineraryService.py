@@ -51,7 +51,11 @@ def _edge_cost(edge, aircraft, aircraft_config):
     # Subsidized route:
     # 20% free → 80% charged
     if edge.base_cost == 0:
-        return edge.distance_km * 0.80 * cost_per_km
+        projected_sub   = subsidized_km + edge.distance_km
+        projected_total = total_km + edge.distance_km
+        if projected_total > 0 and projected_sub / projected_total > 0.20:
+            return edge.distance_km * cost_per_km  # limit exceeded — full price
+        return 0.0  # within the 20 % allowance — free
 
     return edge.distance_km * cost_per_km
 
