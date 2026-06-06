@@ -1,40 +1,55 @@
-# itineraryService.py — R2.2: DFS max-coverage proposals + Dijkstra manual search
+# itineraryService.py — ITEM 2.2.2
+# DFS max-coverage proposals + Dijkstra manual search
 #
 # Proposal A/B use DFS with pruning (orienteering problem, NP-hard,
-# feasible for ~30 nodes).  Manual search uses Dijkstra on non-negative
-# edge weights (distance, time, cost).
+# feasible for ~30 nodes).
+#
+# Manual search uses Dijkstra on non-negative edge weights
+# (distance, time, cost).
 
 import math
 
-from models.graph import Graph
-
 
 # ──────────────────────────────────────────────────────────────────────
-# Helper: pick the best aircraft for an edge given a criterion
+# Aircraft selection helpers
 # ──────────────────────────────────────────────────────────────────────
 
 def _pick_aircraft(edge, criterion, aircraft_config, preferred_set):
-    # Pick the best aircraft on an edge for a given criterion
-    # Returns aircraft name or None if none available
-    valid = [a for a in edge.aircraft if not preferred_set or a in preferred_set]
+
+    # Filter preferred aircraft if provided
+    valid = [
+        a for a in edge.aircraft
+        if not preferred_set or a in preferred_set
+    ]
+
     if not valid:
         return None
 
+    # Distance does not optimize aircraft
+    if criterion == "distance":
+        return valid[0]
+
+    # Cost optimization
     if criterion in ("budget", "cost"):
         key = lambda a: aircraft_config[a]["costPerKm"]
+
+    # Time optimization
     elif criterion == "time":
         key = lambda a: aircraft_config[a]["timePerKm"]
-    else:  # distance — first valid
+
+    else:
         return valid[0]
 
     return min(valid, key=key)
 
 
 def _edge_cost(edge, aircraft, aircraft_config):
-    # Cost = distance_km * cost_per_km
-    # Subsidised routes (base_cost == 0): 20% free, 80% charged
+
+    # Cost = distance * cost_per_km
     cost_per_km = aircraft_config[aircraft]["costPerKm"]
 
+    # Subsidized route:
+    # 20% free → 80% charged
     if edge.base_cost == 0:
         return edge.distance_km * 0.80 * cost_per_km
 
@@ -42,98 +57,196 @@ def _edge_cost(edge, aircraft, aircraft_config):
 
 
 def _edge_time(edge, aircraft, aircraft_config):
-    # Time = distance_km * time_per_km (in minutes)
+
+    # Time returned in MINUTES
     time_per_km = aircraft_config[aircraft]["timePerKm"]
+
     return edge.distance_km * time_per_km
+
+
+def _exceeds_subsidized_limit(edge, subsidized_km, total_km):
+
+    # Rule only applies to subsidized routes
+    if edge.base_cost != 0:
+        return False
+
+    # First segment always allowed
+    if total_km == 0:
+        return False
+
+    new_total = total_km + edge.distance_km
+    new_subsidized = subsidized_km + edge.distance_km
+
+    return new_subsidized > 0.20 * new_total
 
 
 # ──────────────────────────────────────────────────────────────────────
 # DFS with pruning — maximum destination coverage
 # ──────────────────────────────────────────────────────────────────────
 
-def _dfs_max_coverage(graph, current_id, visited, budget_spent, time_spent,
-                      budget_limit, time_limit_mins, aircraft_used, segments,
-                      criterion, aircraft_config, preferred_set,
-                      all_aircraft_types=None,
-                      subsidized_km=0.0, total_km=0.0):
-    # DFS with pruning: returns (destinations_count, segments, budget, time, aircraft_set)
-    # Prioritises solutions that use all aircraft types (R2.2 transport diversity)
-    # Enforces max 20% distance on subsidized routes (base_cost == 0)
+def _dfs_max_coverage(
+    graph,
+    current_id,
+    visited,
+    budget_spent,
+    time_spent_min,
+    budget_limit,
+    time_limit_min,
+    aircraft_used,
+    segments,
+    criterion,
+    aircraft_config,
+    preferred_set,
+    all_aircraft_types=None,
+    subsidized_km=0.0,
+    total_km=0.0
+):
+
     if all_aircraft_types is None:
         all_aircraft_types = set()
 
     current = graph.get_vertex(current_id)
+
     if current is None:
-        return (len(visited), list(segments), budget_spent, time_spent,
-                set(aircraft_used))
-
-    best = (len(visited), list(segments), budget_spent, time_spent,
-            set(aircraft_used))
-
-    for edge in current.adjacencies:
-        dest_id = edge.destination_vertex.id
-        if dest_id in visited:
-            continue
-
-        chosen = _pick_aircraft(edge, criterion, aircraft_config, preferred_set)
-        if chosen is None:
-            continue
-
-        ec = _edge_cost(edge, chosen, aircraft_config)
-        et = _edge_time(edge, chosen, aircraft_config)
-
-        new_total = total_km + edge.distance_km
-        new_subsidized = subsidized_km + (edge.distance_km if edge.base_cost == 0 else 0)
-
-        # 20% subsidized route limit (only for subsidized segments, and only after first segment)
-        if edge.base_cost == 0 and total_km > 0 and new_subsidized > 0.20 * new_total:
-            continue
-
-        new_budget = budget_spent + ec
-        new_time = time_spent + et
-
-        if new_budget > budget_limit or new_time > time_limit_mins:
-            continue
-
-        new_aircraft = set(aircraft_used)
-        new_aircraft.add(chosen)
-
-        new_visited = set(visited)
-        new_visited.add(dest_id)
-
-        new_segments = list(segments)
-        new_segments.append({
-            "origin": current_id,
-            "destination": dest_id,
-            "aircraft": chosen,
-            "distance_km": edge.distance_km,
-            "cost": round(ec, 2),
-            "time_min": round(et, 2),
-        })
-
-        result = _dfs_max_coverage(
-            graph, dest_id, new_visited,
-            new_budget, new_time,
-            budget_limit, time_limit_mins,
-            new_aircraft, new_segments,
-            criterion, aircraft_config, preferred_set,
-            all_aircraft_types,
-            new_subsidized, new_total,
+        return (
+            len(visited),
+            list(segments),
+            budget_spent,
+            time_spent_min,
+            set(aircraft_used)
         )
 
-        # Priority: aircraft diversity > destinations > resource consumption
-        result_all = all_aircraft_types.issubset(result[4])
-        best_all = all_aircraft_types.issubset(best[4])
+    best = (
+        len(visited),
+        list(segments),
+        budget_spent,
+        time_spent_min,
+        set(aircraft_used)
+    )
 
-        if result_all and not best_all:
+    for edge in current.adjacencies:
+
+        destination_id = edge.destination_vertex.id
+
+        if destination_id in visited:
+            continue
+
+        chosen_aircraft = _pick_aircraft(
+            edge,
+            criterion,
+            aircraft_config,
+            preferred_set
+        )
+
+        if chosen_aircraft is None:
+            continue
+
+        edge_cost = _edge_cost(
+            edge,
+            chosen_aircraft,
+            aircraft_config
+        )
+
+        edge_time_min = _edge_time(
+            edge,
+            chosen_aircraft,
+            aircraft_config
+        )
+
+        # Enforce subsidized route limit
+        if _exceeds_subsidized_limit(
+            edge,
+            subsidized_km,
+            total_km
+        ):
+            continue
+
+        new_total_km = total_km + edge.distance_km
+
+        new_subsidized_km = subsidized_km + (
+            edge.distance_km
+            if edge.base_cost == 0 else 0
+        )
+
+        new_budget = budget_spent + edge_cost
+        new_time_min = time_spent_min + edge_time_min
+
+        # Resource constraints
+        if (
+            new_budget > budget_limit or
+            new_time_min > time_limit_min
+        ):
+            continue
+
+        # Track aircraft diversity
+        new_aircraft_used = set(aircraft_used)
+        new_aircraft_used.add(chosen_aircraft)
+
+        # Track visited airports
+        new_visited = set(visited)
+        new_visited.add(destination_id)
+
+        # Build segment
+        new_segments = list(segments)
+
+        new_segments.append({
+            "origin": current_id,
+            "destination": destination_id,
+            "aircraft": chosen_aircraft,
+
+            "distance_km": edge.distance_km,
+
+            "cost": round(edge_cost, 2),
+
+            "time_min": round(edge_time_min, 2),
+
+            "time_hours": round(
+                edge_time_min / 60.0,
+                2
+            )
+        })
+
+        # Recursive DFS
+        result = _dfs_max_coverage(
+            graph,
+            destination_id,
+            new_visited,
+            new_budget,
+            new_time_min,
+            budget_limit,
+            time_limit_min,
+            new_aircraft_used,
+            new_segments,
+            criterion,
+            aircraft_config,
+            preferred_set,
+            all_aircraft_types,
+            new_subsidized_km,
+            new_total_km
+        )
+
+        # Priorities:
+        # 1. Aircraft diversity
+        # 2. Destination count
+        # 3. Lower resource usage
+
+        result_uses_all = all_aircraft_types.issubset(result[4])
+        best_uses_all = all_aircraft_types.issubset(best[4])
+
+        if result_uses_all and not best_uses_all:
             best = result
-        elif best_all and not result_all:
+
+        elif best_uses_all and not result_uses_all:
             pass
+
         elif result[0] > best[0]:
             best = result
+
         elif result[0] == best[0]:
+
             if criterion == "budget" and result[2] < best[2]:
                 best = result
+
             elif criterion == "time" and result[3] < best[3]:
                 best = result
 
@@ -141,29 +254,57 @@ def _dfs_max_coverage(graph, current_id, visited, budget_spent, time_spent,
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Public API — Proposal A
+# Proposal A — Max coverage by budget
 # ──────────────────────────────────────────────────────────────────────
 
-def propose_max_coverage_by_budget(graph, origin_id, budget_usd,
-                                   time_hours=float("inf"),
-                                   preferred_aircraft=None):
-    # Proposal A: max destinations under a budget constraint using DFS
+def propose_max_coverage_by_budget(
+    graph,
+    origin_id,
+    budget_usd,
+    time_hours=float("inf"),
+    preferred_aircraft=None
+):
+
     if graph.get_vertex(origin_id) is None:
-        return {"success": False, "error": f"Unknown origin airport: {origin_id}"}
+        return {
+            "success": False,
+            "error": f"Unknown origin airport: {origin_id}"
+        }
+
     if preferred_aircraft is None:
         preferred_aircraft = set()
 
-    pref_set = set(preferred_aircraft) if preferred_aircraft else set()
-    time_limit_mins = time_hours * 60.0
-    all_types = set(graph.aircraft_config.keys())
+    preferred_set = (
+        set(preferred_aircraft)
+        if preferred_aircraft else set()
+    )
 
-    _, segments, total_cost, total_time, aircraft_used = _dfs_max_coverage(
-        graph, origin_id, {origin_id},
-        0.0, 0.0,
-        budget_usd, time_limit_mins,
-        set(), [],
-        "budget", graph.aircraft_config, pref_set,
-        all_types,
+    time_limit_min = time_hours * 60.0
+
+    all_aircraft_types = set(
+        graph.aircraft_config.keys()
+    )
+
+    (
+        _,
+        segments,
+        total_cost,
+        total_time_min,
+        aircraft_used
+    ) = _dfs_max_coverage(
+        graph,
+        origin_id,
+        {origin_id},
+        0.0,
+        0.0,
+        budget_usd,
+        time_limit_min,
+        set(),
+        [],
+        "budget",
+        graph.aircraft_config,
+        preferred_set,
+        all_aircraft_types
     )
 
     if not segments:
@@ -173,52 +314,96 @@ def propose_max_coverage_by_budget(graph, origin_id, budget_usd,
             "destinations_visited": 0,
             "segments": [],
             "total_cost": 0.0,
+            "total_time_min": 0.0,
             "total_time_hours": 0.0,
             "aircraft_used": [],
             "path": [origin_id],
-            "note": "No additional destinations reachable within the given budget and time.",
+            "note": (
+                "No additional destinations reachable "
+                "within the given budget and time."
+            )
         }
 
     path = [origin_id]
-    for s in segments:
-        path.append(s["destination"])
+
+    for segment in segments:
+        path.append(segment["destination"])
 
     return {
         "success": True,
         "origin": origin_id,
+
         "destinations_visited": len(segments),
+
         "segments": segments,
+
         "total_cost": round(total_cost, 2),
-        "total_time_hours": round(total_time / 60.0, 2),
+
+        "total_time_min": round(total_time_min, 2),
+
+        "total_time_hours": round(
+            total_time_min / 60.0,
+            2
+        ),
+
         "aircraft_used": list(aircraft_used),
-        "path": path,
+
+        "path": path
     }
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Public API — Proposal B
+# Proposal B — Max coverage by time
 # ──────────────────────────────────────────────────────────────────────
 
-def propose_max_coverage_by_time(graph, origin_id, time_hours,
-                                 budget_usd=float("inf"),
-                                 preferred_aircraft=None):
-    # Proposal B: max destinations under a time constraint using DFS
+def propose_max_coverage_by_time(
+    graph,
+    origin_id,
+    time_hours,
+    budget_usd=float("inf"),
+    preferred_aircraft=None
+):
+
     if graph.get_vertex(origin_id) is None:
-        return {"success": False, "error": f"Unknown origin airport: {origin_id}"}
+        return {
+            "success": False,
+            "error": f"Unknown origin airport: {origin_id}"
+        }
+
     if preferred_aircraft is None:
         preferred_aircraft = set()
 
-    pref_set = set(preferred_aircraft) if preferred_aircraft else set()
-    time_limit_mins = time_hours * 60.0
-    all_types = set(graph.aircraft_config.keys())
+    preferred_set = (
+        set(preferred_aircraft)
+        if preferred_aircraft else set()
+    )
 
-    _, segments, total_cost, total_time, aircraft_used = _dfs_max_coverage(
-        graph, origin_id, {origin_id},
-        0.0, 0.0,
-        budget_usd, time_limit_mins,
-        set(), [],
-        "time", graph.aircraft_config, pref_set,
-        all_types,
+    time_limit_min = time_hours * 60.0
+
+    all_aircraft_types = set(
+        graph.aircraft_config.keys()
+    )
+
+    (
+        _,
+        segments,
+        total_cost,
+        total_time_min,
+        aircraft_used
+    ) = _dfs_max_coverage(
+        graph,
+        origin_id,
+        {origin_id},
+        0.0,
+        0.0,
+        budget_usd,
+        time_limit_min,
+        set(),
+        [],
+        "time",
+        graph.aircraft_config,
+        preferred_set,
+        all_aircraft_types
     )
 
     if not segments:
@@ -228,116 +413,276 @@ def propose_max_coverage_by_time(graph, origin_id, time_hours,
             "destinations_visited": 0,
             "segments": [],
             "total_cost": 0.0,
+            "total_time_min": 0.0,
             "total_time_hours": 0.0,
             "aircraft_used": [],
             "path": [origin_id],
-            "note": "No additional destinations reachable within the given time and budget.",
+            "note": (
+                "No additional destinations reachable "
+                "within the given time and budget."
+            )
         }
 
     path = [origin_id]
-    for s in segments:
-        path.append(s["destination"])
+
+    for segment in segments:
+        path.append(segment["destination"])
 
     return {
         "success": True,
         "origin": origin_id,
+
         "destinations_visited": len(segments),
+
         "segments": segments,
+
         "total_cost": round(total_cost, 2),
-        "total_time_hours": round(total_time / 60.0, 2),
+
+        "total_time_min": round(total_time_min, 2),
+
+        "total_time_hours": round(
+            total_time_min / 60.0,
+            2
+        ),
+
         "aircraft_used": list(aircraft_used),
-        "path": path,
+
+        "path": path
     }
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Public API — Manual Route Search (multiple criteria)
+# Dijkstra helpers
 # ──────────────────────────────────────────────────────────────────────
 
-def _criterion_weight_fn(criterion, aircraft_config, preferred_set):
-    # Returns a weight function (edge -> float) for Dijkstra based on criterion
+def _criterion_weight_fn(
+    criterion,
+    aircraft_config,
+    preferred_set
+):
+
     def weight_fn(edge):
-        chosen = _pick_aircraft(edge, criterion, aircraft_config, preferred_set)
-        if chosen is None:
+
+        chosen_aircraft = _pick_aircraft(
+            edge,
+            criterion,
+            aircraft_config,
+            preferred_set
+        )
+
+        if chosen_aircraft is None:
             return float("inf")
+
         if criterion == "distance":
             return edge.distance_km
+
         if criterion == "time":
-            return _edge_time(edge, chosen, aircraft_config)
+            return _edge_time(
+                edge,
+                chosen_aircraft,
+                aircraft_config
+            )
+
         if criterion == "cost":
-            return _edge_cost(edge, chosen, aircraft_config)
+            return _edge_cost(
+                edge,
+                chosen_aircraft,
+                aircraft_config
+            )
+
         return edge.distance_km
+
     return weight_fn
 
 
-def _criterion_edge_filter(include_secondary, origin_id=None):
-    # Returns an edge filter that optionally excludes secondary airports
+def _criterion_edge_filter(include_secondary):
+
     def edge_filter(edge):
-        if not include_secondary and not edge.destination_vertex.is_hub:
+
+        if (
+            not include_secondary and
+            not edge.destination_vertex.is_hub
+        ):
             return False
+
         return True
+
     return edge_filter
 
 
-def find_best_routes(graph, origin_id, destination_id, criteria,
-                     include_secondary=True, preferred_aircraft=None):
-    # Dijkstra-based manual search: one result per criterion (distance, time, cost)
+# ──────────────────────────────────────────────────────────────────────
+# Manual route search (Dijkstra)
+# ──────────────────────────────────────────────────────────────────────
+
+def find_best_routes(
+    graph,
+    origin_id,
+    destination_id,
+    criteria,
+    include_secondary=True,
+    preferred_aircraft=None
+):
+
     if graph.get_vertex(origin_id) is None:
-        return [{"criterion": c, "success": False,
-                 "error": f"Unknown origin: {origin_id}"} for c in criteria]
+        return [{
+            "criterion": c,
+            "success": False,
+            "error": f"Unknown origin: {origin_id}"
+        } for c in criteria]
+
     if graph.get_vertex(destination_id) is None:
-        return [{"criterion": c, "success": False,
-                 "error": f"Unknown destination: {destination_id}"} for c in criteria]
+        return [{
+            "criterion": c,
+            "success": False,
+            "error": f"Unknown destination: {destination_id}"
+        } for c in criteria]
 
     if preferred_aircraft is None:
         preferred_aircraft = set()
-    pref_set = set(preferred_aircraft) if preferred_aircraft else set()
-    edge_filter = _criterion_edge_filter(include_secondary)
+
+    preferred_set = (
+        set(preferred_aircraft)
+        if preferred_aircraft else set()
+    )
+
+    edge_filter = _criterion_edge_filter(
+        include_secondary
+    )
 
     results = []
 
     for criterion in criteria:
-        c = criterion.lower().strip()
-        if c not in ("distance", "time", "cost"):
-            results.append({"criterion": criterion, "success": False,
-                            "error": f"Unknown criterion: {criterion}"})
-            continue
 
-        weight_fn = _criterion_weight_fn(c, graph.aircraft_config, pref_set)
-        d, p, path = graph.dijkstra(origin_id, destination_id, weight_fn, edge_filter, criterion=c)
+        normalized = criterion.lower().strip()
 
-        if path is None or len(path) == 0 or d.get(destination_id, math.inf) == math.inf:
-            results.append({"criterion": c, "success": False,
-                            "error": "No valid route found."})
-            continue
+        if normalized not in (
+            "distance",
+            "time",
+            "cost"
+        ):
 
-        # Build segment details from the path
-        built_segments = []
-        for i in range(len(path) - 1):
-            o = path[i]
-            dst = path[i + 1]
-            origin_v = graph.get_vertex(o)
-            edge_obj = None
-            for e in origin_v.adjacencies:
-                if e.destination_vertex.id == dst:
-                    edge_obj = e
-                    break
-            chosen = _pick_aircraft(edge_obj, c, graph.aircraft_config, pref_set) \
-                if edge_obj else "Unknown"
-            built_segments.append({
-                "origin": o,
-                "destination": dst,
-                "aircraft": chosen or "Unknown",
-                "distance_km": edge_obj.distance_km if edge_obj else 0,
-                "weight": round(d[dst] - d[o], 2),
+            results.append({
+                "criterion": criterion,
+                "success": False,
+                "error": (
+                    f"Unknown criterion: {criterion}"
+                )
             })
 
-        results.append({
-            "criterion": c,
+            continue
+
+        weight_fn = _criterion_weight_fn(
+            normalized,
+            graph.aircraft_config,
+            preferred_set
+        )
+
+        distances, previous, path = graph.dijkstra(
+            origin_id,
+            destination_id,
+            weight_fn,
+            edge_filter,
+            criterion=normalized
+        )
+
+        if (
+            path is None or
+            len(path) == 0 or
+            distances.get(destination_id, math.inf) == math.inf
+        ):
+
+            results.append({
+                "criterion": normalized,
+                "success": False,
+                "error": "No valid route found."
+            })
+
+            continue
+
+        built_segments = []
+
+        for i in range(len(path) - 1):
+
+            origin = path[i]
+            destination = path[i + 1]
+
+            origin_vertex = graph.get_vertex(origin)
+
+            edge_obj = None
+
+            for edge in origin_vertex.adjacencies:
+
+                if edge.destination_vertex.id == destination:
+                    edge_obj = edge
+                    break
+
+            chosen_aircraft = (
+                _pick_aircraft(
+                    edge_obj,
+                    normalized,
+                    graph.aircraft_config,
+                    preferred_set
+                )
+                if edge_obj else "Unknown"
+            )
+
+            segment = {
+                "origin": origin,
+                "destination": destination,
+                "aircraft": chosen_aircraft or "Unknown",
+                "distance_km": (
+                    edge_obj.distance_km
+                    if edge_obj else 0
+                )
+            }
+
+            metric_value = round(
+                distances[destination] - distances[origin],
+                2
+            )
+
+            if normalized == "distance":
+                segment["distance_metric_km"] = metric_value
+
+            elif normalized == "time":
+                segment["time_metric_min"] = metric_value
+                segment["time_metric_hours"] = round(
+                    metric_value / 60.0,
+                    2
+                )
+
+            elif normalized == "cost":
+                segment["cost_metric_usd"] = metric_value
+
+            built_segments.append(segment)
+
+        total_metric = round(
+            distances[destination_id],
+            2
+        )
+
+        result = {
+            "criterion": normalized,
             "success": True,
             "path": path,
-            "segments": built_segments,
-            "total_weight": round(d[destination_id], 2),
-        })
+            "segments": built_segments
+        }
+
+        if normalized == "distance":
+            result["total_distance_km"] = total_metric
+
+        elif normalized == "time":
+            result["total_time_min"] = total_metric
+            result["total_time_hours"] = round(
+                total_metric / 60.0,
+                2
+            )
+
+        elif normalized == "cost":
+            result["total_cost_usd"] = total_metric
+
+        results.append(result)
 
     return results
+
+# END ITEM 2.2.2 
