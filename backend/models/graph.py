@@ -229,3 +229,32 @@ class Graph:
     def __repr__(self):
         total_routes = sum(len(v.adjacencies) for v in self.vertices)
         return f"Graph({len(self.vertices)} airports, {total_routes} routes)"
+    
+    def block_edge(self, edge, traveler):
+        edge.is_blocked = True
+        edge_filter = lambda e: not e.is_blocked
+
+        # Caso 1: viajero en tránsito en esa arista
+        if traveler.is_flying and traveler.current_flight == edge:
+            traveler.is_flying = False
+            traveler.current_flight = None
+            traveler.current_location = edge.origin_vertex
+            dist, pred, path = self.dijkstra(
+                edge.origin_vertex.id,
+                traveler.destination,
+                edge_filter=edge_filter
+            )
+            print(f"Viajero regresado a {edge.origin_vertex.id}")
+            print(f"Nueva ruta: {' → '.join(path)}")
+
+        # Caso 2: arista bloqueada está en el itinerario planificado
+        elif traveler.planned_route and edge in traveler.planned_route:
+            dist, pred, path = self.dijkstra(
+                traveler.current_location.id,
+                traveler.destination,
+                edge_filter=edge_filter
+            )
+            traveler.planned_route = path
+            print(f"Itinerario recalculado: {' → '.join(path)}")
+
+        print(f"Ruta hacia {edge.destination_vertex.id} bloqueada.")

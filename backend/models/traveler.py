@@ -7,10 +7,13 @@ class Traveler:
         self.budget = budget
         self.current_location = None
         self.current_time = 0
+        self.arrival_time = 0
         self.food_interval = food_interval
         self.accommodation_interval = accommodation_interval
-        self.arrival_time = 0 
-
+        self.is_flying = False
+        self.current_flight = None
+        self.destination = None
+        self.planned_route = None
 
     # El viajero ya aterrizó
     def check_obligatory(self, node):
@@ -29,29 +32,34 @@ class Traveler:
             self.last_accommodation = self.current_time
             self.budget -= cost
             self.total_cost += cost
-            
+
     def check_flight(self, edge, time_per_km):
+        self.is_flying = True
+        self.current_flight = edge
+
         # Calcular duracion del vuelo y hora de llegada
         flight_duration = edge.distance_km * time_per_km
         arrival_time = self.current_time + flight_duration
-        
+
         # Comidas durante el vuelo — costo del nodo actual (origen)
-        meals = (self.  arrival_time - self.last_food) // self.food_interval
+        meals = (arrival_time - self.last_food) // self.food_interval
         if meals > 0:
             cost = meals * self.current_location.food_cost
             self.last_food += meals * self.food_interval
             self.budget -= cost
             self.total_cost += cost
-        
+
         # Actualizar tiempo actual a hora de llegada
-        self.arrival_time = arrival_time     
-        
-        
+        self.current_time = arrival_time
+        self.arrival_time = arrival_time
+        self.is_flying = False
+        self.current_flight = None
+
     def do_activity(self, activity, edge):
         duration_activity = activity["durationMin"] / 60
         finish_time = self.current_time + duration_activity
         available_until = self.arrival_time + (edge.minimum_stay / 60)
-        
+
         if finish_time <= available_until:
             self.current_time = finish_time
             self.total_cost += activity["costUSD"]
