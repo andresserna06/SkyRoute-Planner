@@ -1,10 +1,10 @@
-# R2 — Route search: Dijkstra by cost / time / distance
+# ── ITEM 2.2.c — Web callback: Dijkstra route search (origin, dest, criteria, highlight path on graph) ──
 
 from dash import html, Input, Output, State
 import dash
 
-from services.graphService import build_graph_from_dict
-from services.itineraryService import find_best_routes
+from backend.services.graphService import build_graph_from_dict
+from backend.services.itineraryService import find_best_routes
 from frontend.config import COLORS, CARD
 
 
@@ -75,3 +75,5 @@ def register(app):
                             "marginTop": "10px", "textAlign": "right"}),
         ])
         return card, {"path": path}
+
+# ── END ITEM 2.2.c ──

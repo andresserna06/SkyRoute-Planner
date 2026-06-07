@@ -1,3 +1,5 @@
+# ── ITEM 2.1 — Full Dash layout: header, upload, legend, Cytoscape graph, sidebar tabs ──
+
 from dash import dcc, html
 import dash_cytoscape as cyto
 
@@ -181,7 +183,8 @@ def build_layout():
                                                     dcc.Input(id="hours-input", type="number", placeholder="Horas a trabajar",
                                                               min=0.5, step=0.5, style={**INPUT_STYLE, "marginBottom": "8px"}),
                                                     html.Button("Trabajar", id="work-btn", n_clicks=0,
-                                                                style={**BTN_NEUTRAL, "width": "100%"}),
+                                                                 style={**BTN_NEUTRAL, "width": "100%"}),
+                                                    html.Div(id="job-result", style={"fontSize": "11px", "marginTop": "6px", "color": COLORS["text_dim"]}),
                                                 ]),
                                             ]),
 
@@ -238,3 +241,5 @@ def build_layout():
             ]),
         ],
     )
+
+# ── END ITEM 2.1 ──

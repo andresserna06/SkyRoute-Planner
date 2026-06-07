@@ -1,17 +1,12 @@
-# itineraryService.py — ITEM 2.2.2
-# DFS max-coverage proposals + Dijkstra manual search
-#
-# Proposal A/B use DFS with pruning (orienteering problem, NP-hard,
-# feasible for ~30 nodes).
-#
-# Manual search uses Dijkstra on non-negative edge weights
-# (distance, time, cost).
+# ── ITEM 2.2 — DFS proposals A/B (max destinations by budget or time)
+#               + Dijkstra route search by distance/time/cost (2.2.c) ──
 
 import math
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Aircraft selection helpers
+# ITEM 2.2 (shared) — Aircraft selection: picks optimal aircraft per criterion
+#                     Edge cost/time with subsidized route 20% rule
 # ──────────────────────────────────────────────────────────────────────
 
 def _pick_aircraft(edge, criterion, aircraft_config, preferred_set):
@@ -85,7 +80,9 @@ def _exceeds_subsidized_limit(edge, subsidized_km, total_km):
 
 
 # ──────────────────────────────────────────────────────────────────────
-# DFS with pruning — maximum destination coverage
+# ITEM 2.2.a / 2.2.b — DFS with pruning (orienteering, ~30 nodes feasible)
+#   Maximises destinations while respecting budget (2.2.a) or time (2.2.b)
+#   Enforces aircraft diversity (all types used at least once)
 # ──────────────────────────────────────────────────────────────────────
 
 def _dfs_max_coverage(
@@ -258,7 +255,9 @@ def _dfs_max_coverage(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Proposal A — Max coverage by budget
+# ITEM 2.2.a — Proposal A: route visiting max destinations without exceeding budget
+#   Input: origin, budget_usd, time_hours, preferred_aircraft
+#   Output: flight sequence, costs per segment, cumulative total
 # ──────────────────────────────────────────────────────────────────────
 
 def propose_max_coverage_by_budget(
@@ -357,7 +356,9 @@ def propose_max_coverage_by_budget(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Proposal B — Max coverage by time
+# ITEM 2.2.b — Proposal B: route visiting max destinations within available time
+#   Input: origin, time_hours, budget_usd, preferred_aircraft
+#   Output: flight sequence, duration per segment, cumulative time
 # ──────────────────────────────────────────────────────────────────────
 
 def propose_max_coverage_by_time(
@@ -456,7 +457,7 @@ def propose_max_coverage_by_time(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Dijkstra helpers
+# ITEM 2.2.c — Dijkstra helpers: weight function (cost/time/distance) + edge filter (secondary toggle)
 # ──────────────────────────────────────────────────────────────────────
 
 def _criterion_weight_fn(
@@ -515,7 +516,9 @@ def _criterion_edge_filter(include_secondary):
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Manual route search (Dijkstra)
+# ITEM 2.2.c — Manual route search: Dijkstra by distance, time, or cost
+#   Supports: origin/destination, multiple criteria, secondary airport toggle,
+#             preferred aircraft filter. Returns one result per criterion.
 # ──────────────────────────────────────────────────────────────────────
 
 def find_best_routes(
@@ -689,4 +692,4 @@ def find_best_routes(
 
     return results
 
-# END ITEM 2.2.2 
+# ── END ITEM 2.2 ──

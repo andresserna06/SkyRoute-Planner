@@ -1,12 +1,12 @@
-# R1 — Graph visualization: file upload, layout, stylesheet, airport info
+# ── ITEM 2.1 — Web callbacks: JSON upload → build graph, layout switch, node info, route highlight ──
 
 import base64
 import json
 
-from dash import html, Input, Output, State, dash_table
+from dash import html, Input, Output, State
 import dash
 
-from services.graphService import build_graph_from_dict
+from backend.services.graphService import build_graph_from_dict
 from frontend.config import COLORS, LAYOUTS, _placeholder
 from frontend.graph_helpers import build_elements, base_stylesheet
 
@@ -27,6 +27,7 @@ def register(app):
         State("upload-json",     "filename"),
     )
     def load_uploaded_json(contents, filename):
+        # User uploaded a JSON file: parse it, build the graph and update the UI
         if contents is None:
             raise dash.exceptions.PreventUpdate
         _, content_string = contents.split(",")
@@ -35,6 +36,7 @@ def register(app):
             data  = json.loads(decoded.decode("utf-8"))
             g     = build_graph_from_dict(data)
             elems = build_elements(g)
+            # Build airport dropdown options for both tabs
             airport_opts = [{"label": f"{v.id} — {v.city}", "value": v.id}
                             for v in sorted(g.vertices, key=lambda x: x.id)]
             n_airports = len(g.vertices)
@@ -49,6 +51,7 @@ def register(app):
 
     @app.callback(Output("network-graph", "layout"), Input("layout-dropdown", "value"))
     def update_layout(layout_name):
+        # Change the force-directed / concentric / circular layout
         return LAYOUTS.get(layout_name, LAYOUTS["cose"])
 
     @app.callback(
@@ -59,8 +62,11 @@ def register(app):
         Input("journey-store",         "data"),
     )
     def update_stylesheet(node_data, clear_clicks, route_hl, journey_data):
+        # Update the graph styling based on user interaction:
+        # click a node, highlight a route (R2), or show journey path (R3)
         triggered = dash.callback_context.triggered_id
 
+        # R3: highlight the flown path in orange
         if journey_data and journey_data.get("segments"):
             visited = journey_data.get("visited", [])
             segs    = journey_data.get("segments", [])
@@ -74,6 +80,7 @@ def register(app):
                               "style": {"border-color": COLORS["hub"], "border-width": 4}})
             return rules
 
+        # R2: highlight the optimal route path in violet
         if route_hl and route_hl.get("path"):
             path  = route_hl["path"]
             rules = base_stylesheet() + [{"selector": "edge", "style": {"opacity": 0.07}}]
@@ -87,6 +94,7 @@ def register(app):
                               "style": {"border-color": COLORS["highlight"], "border-width": 4}})
             return rules
 
+        # R1: highlight outgoing routes from a clicked node
         if triggered not in ("clear-selection", None) and node_data:
             nid = node_data["id"]
             return base_stylesheet() + [
@@ -105,6 +113,7 @@ def register(app):
         Input("clear-selection", "n_clicks"),
     )
     def show_airport_info(node_data, clear_clicks):
+        # Show airport details in the left sidebar when a node is clicked
         if dash.callback_context.triggered_id == "clear-selection" or not node_data:
             return _placeholder()
         is_hub = node_data["node_type"] == "hub"
@@ -128,3 +137,5 @@ def register(app):
             html.Div(html.Span("Aerolíneas", style={"fontWeight": "700", "fontSize": "12px"}), style={"marginBottom": "4px"}),
             html.Div(node_data["airlines"], style={"fontSize": "11px", "color": COLORS["text_dim"], "lineHeight": "1.6"}),
         ])
+
+# ── END ITEM 2.1 ──

@@ -1,8 +1,13 @@
+# ── ITEM 2.1 — Cytoscape node/edge builder + base stylesheet (hub orange, secondary blue) ──
+
 from frontend.config import COLORS
 
 
 def build_elements(g):
+    # Convert Graph object into Cytoscape elements (nodes + edges)
     elements = []
+
+    # Create Cytoscape nodes for each airport
     for v in g.vertices:
         elements.append({
             "data": {
@@ -13,8 +18,11 @@ def build_elements(g):
             },
             "classes": "hub" if v.is_hub else "secondary",
         })
+
+    # Create Cytoscape edges for each route
     for v in g.vertices:
         for edge in v.adjacencies:
+            # Short aircraft codes for the edge label
             abbrevs = []
             for a in edge.aircraft:
                 if "Comercial" in a or "Commercial" in a: abbrevs.append("C")
@@ -29,25 +37,31 @@ def build_elements(g):
                 },
                 "classes": "subsidiada" if edge.base_cost == 0 else "ruta",
             })
+
     return elements
 
 
 def base_stylesheet():
+    # Default Cytoscape stylesheet: distinguishes hubs vs secondary airports
     return [
+        # Node label style
         {"selector": "node", "style": {
             "label": "data(label)", "text-valign": "center", "text-halign": "center",
             "font-family": "Inter, Segoe UI, sans-serif", "font-size": "10px",
             "font-weight": "700", "color": "#ffffff", "text-outline-width": 1.6,
             "text-outline-color": COLORS["node_outline"],
         }},
+        # Hub airports: orange, larger
         {"selector": ".hub", "style": {
             "background-color": COLORS["hub"], "width": 56, "height": 56,
             "font-size": "12px", "border-width": 2, "border-color": COLORS["hub_border"],
         }},
+        # Secondary airports: blue, smaller
         {"selector": ".secondary", "style": {
             "background-color": COLORS["secondary"], "width": 38, "height": 38,
             "border-width": 2, "border-color": COLORS["sec_border"],
         }},
+        # Regular route style
         {"selector": "edge.ruta", "style": {
             "label": "data(label)", "curve-style": "bezier",
             "target-arrow-shape": "triangle", "target-arrow-color": COLORS["route"],
@@ -59,6 +73,7 @@ def base_stylesheet():
             "text-border-width": 1, "text-border-color": COLORS["border"],
             "text-border-opacity": 1,
         }},
+        # Subsidized route style: green dashed
         {"selector": "edge.subsidiada", "style": {
             "label": "data(label)", "curve-style": "bezier",
             "target-arrow-shape": "triangle", "target-arrow-color": COLORS["subsidized"],
@@ -72,3 +87,5 @@ def base_stylesheet():
             "text-border-opacity": 1,
         }},
     ]
+
+# ── END ITEM 2.1 ──

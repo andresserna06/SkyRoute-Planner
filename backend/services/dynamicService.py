@@ -1,12 +1,16 @@
-# dynamicService.py — ITEM 2.3.3 C
-# Frontend/API-friendly dynamic itinerary service
+# ── ITEM 2.3 — Advanced planning with dynamic budget
+#   2.3.a: Activities (mandatory lodging/meals + optional tours)
+#   2.3.b: Jobs at airports (earn additional budget when budget < 35%)
+#   2.3.c: Transport costs (aircraft selection, flight cost/time, subsidised 20% rule) ──
 
-from services.itineraryService import (
+from backend.services.itineraryService import (
     _edge_cost,
     _edge_time,
     _exceeds_subsidized_limit
 )
 
+
+# ── ITEM 2.3.c — List affordable flights from current airport (aircraft types, cost/km, time/km) ──
 
 def _list_available_flights(
     vertex,
@@ -16,7 +20,7 @@ def _list_available_flights(
     total_km,
     budget
 ):
-    # Return list of affordable flights from current airport
+    # List flights within budget from current airport (respects subsidised 20% rule)
 
     options = []
 
@@ -51,12 +55,15 @@ def _list_available_flights(
     return options
 
 
+# ── ITEM 2.3 (shared) — Create initial journey state ──
+
 def create_dynamic_state(origin_id, initial_budget):
 
     return {
         "origin_id": origin_id,
         "current_id": origin_id,
         "budget": initial_budget,
+        "initial_budget": initial_budget,
         "time_min": 0.0,
 
         # JSON-safe lists
@@ -67,9 +74,14 @@ def create_dynamic_state(origin_id, initial_budget):
         "free_km": 0.0,
         "total_km": 0.0,
 
+        "jobs_done": [],
+        "total_earned": 0.0,
+
         "finished": False
     }
 
+
+# ── ITEM 2.3.c — API: get list of reachable flights from current airport within remaining budget ──
 
 def get_available_flights(graph, state):
 
@@ -111,6 +123,8 @@ def get_available_flights(graph, state):
         "available_flights": flights
     }
 
+
+# ── ITEM 2.3 (shared) — Take a flight: update budget, time, visited airports, segments ──
 
 def choose_flight(graph, state, flight_id):
 
@@ -199,6 +213,78 @@ def choose_flight(graph, state, flight_id):
     }
 
 
+# ── ITEM 2.3.b — Jobs at airports: earn budget by working ──
+
+def get_available_jobs(graph, state):
+    # Returns list of jobs at the current airport when budget < 35% of initial
+    threshold = state["initial_budget"] * 0.35
+    if state["budget"] > threshold:
+        return {"success": True, "show_jobs": False, "jobs": [],
+                "reason": f"Presupuesto ${state['budget']:.2f} > 35% (${threshold:.2f})"}
+
+    vertex = graph.get_vertex(state["current_id"])
+    if vertex is None:
+        return {"success": False, "show_jobs": False, "jobs": [],
+                "error": f"Unknown airport: {state['current_id']}"}
+
+    raw = getattr(vertex, "jobs", [])
+    if not raw:
+        return {"success": True, "show_jobs": True, "jobs": [],
+                "reason": "No hay trabajos disponibles en este aeropuerto."}
+
+    jobs_out = []
+    for idx, j in enumerate(raw):
+        jobs_out.append({
+            "id": idx,
+            "name": j.get("name", "Trabajo"),
+            "hourly_rate": j.get("hourlyRate", 0),
+            "max_hours": j.get("maxHours", 8),
+        })
+
+    return {"success": True, "show_jobs": True, "jobs": jobs_out}
+
+
+def work_at_job(graph, state, job_index, hours):
+    # Execute work: earnings = hourly_rate * hours, consume time, record job
+    threshold = state["initial_budget"] * 0.35
+    if state["budget"] > threshold:
+        return {"success": False,
+                "error": f"Presupuesto ${state['budget']:.2f} > 35% — no necesitas trabajar."}
+
+    vertex = graph.get_vertex(state["current_id"])
+    if vertex is None:
+        return {"success": False, "error": f"Unknown airport: {state['current_id']}"}
+
+    raw = getattr(vertex, "jobs", [])
+    if job_index < 0 or job_index >= len(raw):
+        return {"success": False, "error": "Trabajo inválido."}
+
+    job = raw[job_index]
+    max_hours = job.get("maxHours", 8)
+    if hours <= 0 or hours > max_hours:
+        return {"success": False,
+                "error": f"Las horas deben estar entre 0.5 y {max_hours}."}
+
+    rate = job.get("hourlyRate", 0)
+    earnings = round(rate * hours, 2)
+
+    # Update state
+    state["budget"] += earnings
+    state["time_min"] += hours * 60
+    state["jobs_done"].append({
+        "airport": state["current_id"],
+        "job_name": job.get("name", "Trabajo"),
+        "hours": hours,
+        "earnings": earnings,
+        "hourly_rate": rate,
+    })
+    state["total_earned"] += earnings
+
+    return {"success": True, "earnings": earnings, "job_name": job.get("name", "Trabajo"),
+            "hours": hours, "remaining_budget": round(state["budget"], 2)}
+
+# ── ITEM 2.3 (shared) — Finish journey and return summary ──
+
 def finish_itinerary(state):
 
     state["finished"] = True
@@ -208,6 +294,8 @@ def finish_itinerary(state):
         "summary": build_summary(state)
     }
 
+
+# ── ITEM 2.3 (shared) — Build journey summary (path, cost, time, destinations, jobs) ──
 
 def build_summary(state):
 
@@ -238,6 +326,10 @@ def build_summary(state):
 
         "aircraft_used": state["aircraft_used"],
 
+        "jobs_done": state["jobs_done"],
+
+        "total_earned": round(state["total_earned"], 2),
+
         "path": path,
 
         "remaining_budget": round(state["budget"], 2),
@@ -245,4 +337,4 @@ def build_summary(state):
         "finished": state["finished"]
     }
     
-# END ITEM 2.3.3 C
+# ── END ITEM 2.3 ──
