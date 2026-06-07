@@ -63,10 +63,19 @@ def register(app):
             traveler.last_accommodation = journey_data.get("last_accommodation", 0)
             traveler.current_location = g.get_vertex(journey_data["current_id"])
 
+            print("current_time:", traveler.current_time)
+            print("last_food:", traveler.last_food)
+            print("last_accommodation:", traveler.last_accommodation)
+            print("budget:", traveler.budget)
+
             choose_flight(g, journey_data, int(flight_val), traveler)
 
             # Save obligatory costs and traveler state back to journey_data
-            journey_data["obligatory_cost"] = round(traveler.total_cost, 2)
+            obligatory_delta = round(traveler.total_cost, 2)
+            journey_data["obligatory_cost"] = round(
+                journey_data.get("obligatory_cost", 0.0) + obligatory_delta, 2
+            )
+            journey_data["budget"] = round(journey_data["budget"] - obligatory_delta, 2)
             journey_data["last_food"] = traveler.last_food
             journey_data["last_accommodation"] = traveler.last_accommodation
 

@@ -212,7 +212,6 @@ def choose_flight(graph, state, flight_id, traveler=None):
         traveler.check_flight(edge, time_per_km)
         traveler.current_location = graph.get_vertex(destination)
         traveler.check_obligatory(graph.get_vertex(destination))
-
     return {
         "success": True,
         "message": "Flight added successfully",

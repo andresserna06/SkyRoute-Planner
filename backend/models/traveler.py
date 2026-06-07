@@ -15,8 +15,9 @@ class Traveler:
         self.destination = None
         self.planned_route = None
 
-    # El viajero ya aterrizó
+    # the traveler is flying
     def check_obligatory(self, node):
+        print("check_obligatory — current_time:", self.current_time, "last_food:", self.last_food)
         # Alimentacion
         meals = (self.current_time - self.last_food) // self.food_interval
         if meals > 0:
@@ -37,11 +38,13 @@ class Traveler:
         self.is_flying = True
         self.current_flight = edge
 
-        # Calcular duracion del vuelo y hora de llegada
-        flight_duration = edge.distance_km * time_per_km
+        flight_duration = (edge.distance_km * time_per_km) / 60.0
         arrival_time = self.current_time + flight_duration
+        
+        print("flight_duration_h:", flight_duration)
+        print("arrival_time:", arrival_time)
+        print("meals:", int((arrival_time - self.last_food) // self.food_interval))
 
-        # Comidas durante el vuelo — costo del nodo actual (origen)
         meals = (arrival_time - self.last_food) // self.food_interval
         if meals > 0:
             cost = meals * self.current_location.food_cost
@@ -49,7 +52,6 @@ class Traveler:
             self.budget -= cost
             self.total_cost += cost
 
-        # Actualizar tiempo actual a hora de llegada
         self.current_time = arrival_time
         self.arrival_time = arrival_time
         self.is_flying = False
