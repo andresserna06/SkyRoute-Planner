@@ -1,9 +1,12 @@
+# ── ITEM 2.1 — JSON parser → Graph builder: nodes, edges, aircraft config ──
+
 import json
-from models.vertex import Vertex
-from models.edge import Edge
-from models.graph import Graph
+from backend.models.vertex import Vertex
+from backend.models.edge import Edge
+from backend.models.graph import Graph
 
 
+# Default aircraft config used when JSON does not provide it
 DEFAULT_AIRCRAFT_CONFIG = {
     "Avión Comercial": {"costPerKm": 0.18, "timePerKm": 0.7},
     "Jet Regional": {"costPerKm": 0.25, "timePerKm": 1.1},
@@ -56,7 +59,7 @@ def build_graph_from_dict(data):
         origin.add_adjacency(edge)
 
     # Load aircraft config from JSON or fall back to defaults
-    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves") or data.get("config", {}).get("aircraft")
+    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves")
     if config:
         for name, values in config.items():
             graph.aircraft_config[name] = {
@@ -77,3 +80,5 @@ def load_from_json(file_path):
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
     return build_graph_from_dict(data)
+
+# ── END ITEM 2.1 ──
