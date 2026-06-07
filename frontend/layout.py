@@ -167,7 +167,7 @@ def build_layout():
                                                          style=DROPDOWN_STYLE, clearable=False),
                                             html.Span("Presupuesto inicial (USD)", style=LABEL),
                                             dcc.Input(id="planner-budget", type="number", placeholder="1000",
-                                                      min=1, step=50, style=INPUT_STYLE),
+                                                      min=1, step=50, value=1000, style=INPUT_STYLE),
                                             html.Button("✈  Iniciar viaje", id="start-btn", n_clicks=0,
                                                         style={**BTN_SUCCESS, "width": "100%"}),
                                         ]),

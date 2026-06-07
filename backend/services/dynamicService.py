@@ -126,7 +126,7 @@ def get_available_flights(graph, state):
 
 # ── ITEM 2.3 (shared) — Take a flight: update budget, time, visited airports, segments ──
 
-def choose_flight(graph, state, flight_id):
+def choose_flight(graph, state, flight_id, traveler=None):
 
     vertex = graph.get_vertex(state["current_id"])
 
@@ -205,6 +205,13 @@ def choose_flight(graph, state, flight_id):
 
     if not remaining:
         state["finished"] = True
+        
+    # 2.3.a — Traveler obligatory activities
+    if traveler is not None:
+        time_per_km = graph.aircraft_config[aircraft]["timePerKm"]
+        traveler.check_flight(edge, time_per_km)
+        traveler.current_location = graph.get_vertex(destination)
+        traveler.check_obligatory(graph.get_vertex(destination))
 
     return {
         "success": True,

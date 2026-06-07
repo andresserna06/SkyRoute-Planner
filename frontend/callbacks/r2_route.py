@@ -27,6 +27,7 @@ def register(app):
                           style={"color": COLORS["error"], "fontSize": "12px"}), None
         g       = build_graph_from_dict(graph_data)
         results = find_best_routes(g, origin, dest, [criteria])
+        # print("RESULT:", results)
         r       = results[0]
         if not r["success"]:
             return html.P(f"Sin ruta: {r.get('error', '')}",
@@ -40,6 +41,7 @@ def register(app):
 
         rows = []
         for seg in segs:
+            metric_value = seg.get('cost_metric_usd') or seg.get('time_metric_min') or seg.get('distance_metric_km') or 0
             rows.append(html.Tr([
                 html.Td(f"{seg['origin']} → {seg['destination']}",
                         style={"padding": "5px 8px", "fontSize": "12px", "fontWeight": "600"}),
@@ -47,10 +49,12 @@ def register(app):
                         style={"padding": "5px 8px", "fontSize": "11px", "color": COLORS["text_dim"]}),
                 html.Td(f"{seg['distance_km']:.0f} km",
                         style={"padding": "5px 8px", "fontSize": "11px"}),
-                html.Td(f"{seg['weight']:.1f} {unit_label}",
+                html.Td(f"{metric_value:.1f} {unit_label}",
                         style={"padding": "5px 8px", "fontSize": "11px", "fontWeight": "600",
                                "color": COLORS["secondary"]}),
             ]))
+
+        total_metric = r.get('total_cost_usd') or r.get('total_time_min') or r.get('total_distance_km') or 0
 
         card = html.Div(style={**CARD, "borderLeft": f"3px solid {COLORS['highlight']}"}, children=[
             html.Div(f"Ruta óptima — {crit_label}",
@@ -70,7 +74,7 @@ def register(app):
                 ])),
                 html.Tbody(rows),
             ]),
-            html.Div(f"Total: {r['total_weight']:.1f} {unit_label}",
+            html.Div(f"Total: {total_metric:.1f} {unit_label}",
                      style={"fontSize": "13px", "fontWeight": "700", "color": COLORS["secondary"],
                             "marginTop": "10px", "textAlign": "right"}),
         ])

@@ -1,5 +1,6 @@
-# ── ITEM 2.3.b / 2.3.c — Web callbacks: jobs (2.3.b), flights (2.3.c),
-#   state machine + budget bar + report (shared) ──
+# ── ITEM 2.3.a — Traveler obligatory activities (food + accommodation) + optional activities
+# ── ITEM 2.3.b — Jobs at airports (earn additional budget when budget < 35%)
+# ── ITEM 2.3.c — Transport costs (aircraft selection, flight cost/time, subsidised 20% rule) ──
 
 from dash import html, Input, Output, State
 import dash
@@ -53,7 +54,22 @@ def register(app):
         if tid == "fly-btn":
             if flight_val is None:
                 raise dash.exceptions.PreventUpdate
-            choose_flight(g, journey_data, int(flight_val))
+
+            # ── ITEM 2.3.a — Reconstruct traveler and check obligatory activities ──
+            from backend.models.traveler import Traveler
+            traveler = Traveler(budget=journey_data["budget"])
+            traveler.current_time = journey_data["time_min"] / 60
+            traveler.last_food = journey_data.get("last_food", 0)
+            traveler.last_accommodation = journey_data.get("last_accommodation", 0)
+            traveler.current_location = g.get_vertex(journey_data["current_id"])
+
+            choose_flight(g, journey_data, int(flight_val), traveler)
+
+            # Save obligatory costs and traveler state back to journey_data
+            journey_data["obligatory_cost"] = round(traveler.total_cost, 2)
+            journey_data["last_food"] = traveler.last_food
+            journey_data["last_accommodation"] = traveler.last_accommodation
+
             return journey_data
 
         if tid == "work-btn":
@@ -99,6 +115,7 @@ def register(app):
         total_cost = sum(s["cost"] for s in journey_data.get("segments", []))
         initial_budget = journey_data.get("initial_budget", remaining + total_cost)
         total_earned = journey_data.get("total_earned", 0)
+        obligatory_cost = journey_data.get("obligatory_cost", 0)
         pct = (remaining / initial_budget * 100) if initial_budget > 0 else 0
         budget_color = COLORS["ok"] if pct > 50 else (COLORS["warning"] if pct > 20 else COLORS["error"])
 
@@ -127,6 +144,13 @@ def register(app):
             status_lines.append(
                 html.Div(f"Ganado con trabajos: ${total_earned:.2f}",
                          style={"fontSize": "11px", "color": COLORS["ok"], "marginTop": "4px", "fontWeight": "600"})
+            )
+
+        # ── ITEM 2.3.a — Show obligatory costs notification (food + accommodation) ──
+        if obligatory_cost > 0:
+            status_lines.append(
+                html.Div(f"Obligatory charges: -${obligatory_cost:.2f} USD (food + accommodation)",
+                         style={"fontSize": "11px", "color": COLORS["error"], "marginTop": "4px", "fontWeight": "600"})
             )
 
         status = html.Div(style={**CARD, "borderLeft": f"3px solid {budget_color}", "marginBottom": "14px"},
@@ -162,11 +186,11 @@ def register(app):
                 if job_opts:
                     job_visible = SHOW
                     if journey_data["budget"] <= initial_budget * 0.35:
-                        job_result = "Presupuesto bajo. Trabaja para ganar más."
+                        job_result = "Low budget. Work to earn more."
                     else:
                         job_visible = HIDE
                 else:
-                    job_result = "No hay trabajos disponibles aquí."
+                    job_result = "No jobs available at this airport."
 
         return (status, HIDE, SHOW, HIDE,
                 flight_opts, None, HIDE, job_visible,
@@ -182,13 +206,13 @@ def _render_report(s):
             rows.append(html.Div(style={**CARD, "marginBottom": "8px"}, children=[
                 html.Div(f"{seg['origin']} → {seg['destination']}",
                          style={"fontWeight": "700", "fontSize": "12px", "marginBottom": "4px"}),
-                html.Div(f"Aeronave: {seg['aircraft']}  ·  {seg['distance_km']:.0f} km",
+                html.Div(f"Aircraft: {seg['aircraft']}  ·  {seg['distance_km']:.0f} km",
                          style={"fontSize": "11px", "color": COLORS["text_dim"]}),
-                html.Div(f"Costo: ${seg['cost']:.2f}  ·  Tiempo: {seg['time_min']:.0f} min",
+                html.Div(f"Cost: ${seg['cost']:.2f}  ·  Time: {seg['time_min']:.0f} min",
                          style={"fontSize": "11px", "color": COLORS["text_dim"]}),
             ]))
         sections.append(html.Div([
-            html.Div(f"Destinos visitados: {s.get('destinations_visited', 0)}",
+            html.Div(f"Destinations visited: {s.get('destinations_visited', 0)}",
                      style={**SECTION_TITLE, "marginBottom": "8px"}),
             *rows,
         ]))
@@ -198,32 +222,32 @@ def _render_report(s):
         for j in s["jobs_done"]:
             job_rows.append(html.Div(style={"fontSize": "11px", "color": COLORS["text_dim"], "marginBottom": "4px"},
                                      children=[
-                html.Span(f"{j['job_name']} en {j['airport']}  ·  ",
+                html.Span(f"{j['job_name']} at {j['airport']}  ·  ",
                           style={"fontWeight": "600"}),
                 html.Span(f"{j['hours']} h  ·  +${j['earnings']:.2f}"),
             ]))
         sections.append(html.Div([
-            html.Div("Trabajos realizados", style={**SECTION_TITLE, "marginBottom": "6px", "marginTop": "12px"}),
+            html.Div("Jobs completed", style={**SECTION_TITLE, "marginBottom": "6px", "marginTop": "12px"}),
             *job_rows,
-            html.Div(f"Total ganado: ${s.get('total_earned', 0):.2f}",
+            html.Div(f"Total earned: ${s.get('total_earned', 0):.2f}",
                      style={"fontSize": "12px", "fontWeight": "700", "color": COLORS["ok"], "marginTop": "6px"}),
         ]))
 
     totals = html.Div(style={**CARD, "borderLeft": f"3px solid {COLORS['hub']}", "marginTop": "14px"}, children=[
-        html.Div("Totales", style={**SECTION_TITLE, "marginBottom": "10px"}),
+        html.Div("Totals", style={**SECTION_TITLE, "marginBottom": "10px"}),
         *[html.Div(style={"display": "flex", "justifyContent": "space-between",
                            "marginBottom": "5px", "fontSize": "12px"}, children=[
             html.Span(label, style={"color": COLORS["text_dim"]}),
             html.Span(value, style={"fontWeight": "700", "color": color}),
         ]) for label, value, color in [
-            ("Presupuesto inicial",   f"${s.get('initial_budget', 0):.2f}", COLORS["text"]),
-            ("Total gastado",         f"${s.get('total_cost', 0):.2f}",     COLORS["error"]),
-            ("Ganado con trabajos",   f"+${s.get('total_earned', 0):.2f}", COLORS["ok"]),
-            ("Saldo final",           f"${s.get('remaining_budget', 0):.2f}", COLORS["text"]),
-            ("Tiempo total",          f"{s.get('total_time_hours', 0):.1f} h", COLORS["text"]),
+            ("Initial budget",     f"${s.get('initial_budget', 0):.2f}", COLORS["text"]),
+            ("Total spent",        f"${s.get('total_cost', 0):.2f}",     COLORS["error"]),
+            ("Earned from jobs",   f"+${s.get('total_earned', 0):.2f}",  COLORS["ok"]),
+            ("Final balance",      f"${s.get('remaining_budget', 0):.2f}", COLORS["text"]),
+            ("Total time",         f"{s.get('total_time_hours', 0):.1f} h", COLORS["text"]),
         ]],
     ])
 
     return html.Div([*sections, totals])
 
-# ── END ITEM 2.3 ──
+# ── END ITEM 2.3.a / 2.3.b / 2.3.c ──

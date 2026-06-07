@@ -50,6 +50,7 @@ def build_graph_from_dict(data):
             raise ValueError(f"Route references unknown destination airport: '{destination_id}'")
 
         edge = Edge(
+            origin_vertex=origin,
             destination_vertex=destination,
             distance_km=item["distanceKm"],
             aircraft=item.get("aircraft", []),
