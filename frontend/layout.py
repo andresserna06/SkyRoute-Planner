@@ -214,20 +214,20 @@ def build_layout():
                                         ]),
 
                                         html.Div(id="arrival-section", style=HIDE, children=[
-                                            html.Div(id="arrival-info"),
-                                            html.Div(id="activity-panel", style=HIDE, children=[
-                                                html.Div("Actividades opcionales",
-                                                         style={"fontSize": "12px", "fontWeight": "700",
-                                                                "color": COLORS["text"], "marginBottom": "8px"}),
-                                                dcc.Checklist(id="activity-checklist", options=[], value=[],
-                                                    style={"fontSize": "12px"},
-                                                    labelStyle={"display": "flex", "alignItems": "flex-start",
-                                                                "gap": "6px", "marginBottom": "6px",
-                                                                "cursor": "pointer", "lineHeight": "1.5"}),
-                                            ]),
-                                            html.Button("Continuar →", id="confirm-activities-btn", n_clicks=0,
-                                                        style={**BTN_PRIMARY, "width": "100%", "marginTop": "10px"}),
+                                        html.Div(id="arrival-info"),
+                                        html.Div(id="activity-panel", children=[   # ← quitado style=HIDE
+                                            html.Div("Optional activities",
+                                                    style={"fontSize": "12px", "fontWeight": "700",
+                                                            "color": COLORS["text"], "marginBottom": "8px"}),
+                                            dcc.Checklist(id="activity-checklist", options=[], value=[],
+                                                style={"fontSize": "12px"},
+                                                labelStyle={"display": "flex", "alignItems": "flex-start",
+                                                            "gap": "6px", "marginBottom": "6px",
+                                                            "cursor": "pointer", "lineHeight": "1.5"}),
                                         ]),
+                                        html.Button("Continuar →", id="confirm-activities-btn", n_clicks=0,
+                                                    style={**BTN_PRIMARY, "width": "100%", "marginTop": "10px"}),
+                                    ]),
 
                                         html.Div(id="complete-section", style=HIDE, children=[
                                             html.Div(id="journey-report"),
