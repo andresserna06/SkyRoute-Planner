@@ -121,6 +121,27 @@ def register(app):
         Input("network-graph",   "tapNodeData"),
         Input("clear-selection", "n_clicks"),
     )
+    
+    @app.callback(
+        Output("network-graph", "elements", allow_duplicate=True),
+        Input("blocked-edges-store", "data"),
+        State("graph-store",         "data"),
+        prevent_initial_call=True,
+    )
+    def update_blocked_edges(blocked_list, graph_data):
+        if not graph_data or not blocked_list:
+            raise dash.exceptions.PreventUpdate
+        g = build_graph_from_dict(graph_data)
+        from frontend.graph_helpers import build_elements
+        elements = build_elements(g)
+        # Mark blocked edges
+        for elem in elements:
+            if "source" in elem.get("data", {}):
+                key = f"{elem['data']['source']}->{elem['data']['target']}"
+                if key in blocked_list:
+                    elem["classes"] = "bloqueada"
+        return elements
+    
     def show_airport_info(node_data, clear_clicks):
         # Show airport details in the left sidebar when a node is clicked
         if dash.callback_context.triggered_id == "clear-selection" or not node_data:
