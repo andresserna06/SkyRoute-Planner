@@ -60,18 +60,26 @@ def build_graph_from_dict(data):
         origin.add_adjacency(edge)
 
     # Load aircraft config from JSON or fall back to defaults
-    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves")
+    config = (
+        data.get("aircraftConfig")
+        or data.get("aircraft_config")
+        or (data.get("config") or {}).get("aircraft")
+        or (data.get("configuracionGlobal") or {}).get("aeronaves")
+    )
     if config:
         for name, values in config.items():
             graph.aircraft_config[name] = {
-                "costPerKm": values.get("costPerKm") or values.get("costoKm", 0.18),
-                "timePerKm": values.get("timePerKm") or values.get("tiempoKm", 0.7),
+                "costPerKm": values["costPerKm"] if "costPerKm" in values else values.get("costoKm", DEFAULT_AIRCRAFT_CONFIG.get(name, {}).get("costPerKm", 0.18)),
+                "timePerKm": values["timePerKm"] if "timePerKm" in values else values.get("tiempoKm", DEFAULT_AIRCRAFT_CONFIG.get(name, {}).get("timePerKm", 0.7)),
             }
     else:
         graph.aircraft_config = dict(DEFAULT_AIRCRAFT_CONFIG)
 
-    # Store full global config for R2.3
-    graph.global_config = data.get("aircraftConfig") or data.get("configuracionGlobal", {})
+    graph.global_config = (
+        data.get("aircraftConfig")
+        or data.get("aircraft_config")
+        or data.get("configuracionGlobal", {})
+    )
 
     return graph
 

@@ -6,7 +6,6 @@
 from backend.services.itineraryService import (
     _edge_cost,
     _edge_time,
-    _exceeds_subsidized_limit
 )
 
 
@@ -20,7 +19,9 @@ def _list_available_flights(
     total_km,
     budget
 ):
-    # List flights within budget from current airport (respects subsidised 20% rule)
+    # List flights within budget from current airport.
+    # First flight: subsidized routes are disabled.
+    # Subsequent flights: disabled if projected ratio exceeds 20%.
 
     options = []
 
@@ -30,9 +31,18 @@ def _list_available_flights(
         if dest_id in visited:
             continue
 
-        # Enforce 20% subsidized route rule
-        if _exceeds_subsidized_limit(edge, free_km, total_km):
-            continue
+        is_subsidized = edge.base_cost == 0
+
+        disabled = False
+        if total_km == 0:
+            # First flight: subsidized not allowed
+            disabled = is_subsidized
+        else:
+            # Subsequent flights: check projected ratio
+            new_sub = free_km + (edge.distance_km if is_subsidized else 0)
+            new_total = total_km + edge.distance_km
+            if new_sub / new_total > 0.20:
+                disabled = True
 
         for aircraft in edge.aircraft:
 
@@ -49,7 +59,10 @@ def _list_available_flights(
                     "aircraft": aircraft,
                     "distance_km": edge.distance_km,
                     "cost": round(cost, 2),
-                    "time_min": round(time_min, 2)
+                    "time_min": round(time_min, 2),
+                    "subsidized": is_subsidized,
+                    "disabled": disabled,
+                    "warning": "Esta ruta supera el limite subsidiado permitido." if disabled else ""
                 })
 
     return options
@@ -112,7 +125,10 @@ def get_available_flights(graph, state):
             "aircraft": option["aircraft"],
             "distance_km": option["distance_km"],
             "cost": option["cost"],
-            "time_min": option["time_min"]
+            "time_min": option["time_min"],
+            "subsidized": option.get("subsidized", False),
+            "disabled": option.get("disabled", False),
+            "warning": option.get("warning", "")
         })
 
     return {
@@ -153,6 +169,12 @@ def choose_flight(graph, state, flight_id, traveler=None):
         }
 
     selected = options[flight_id]
+
+    if selected.get("disabled"):
+        return {
+            "success": False,
+            "error": "Esta ruta supera el limite subsidiado permitido."
+        }
 
     edge = selected["_edge"]
     aircraft = selected["aircraft"]
@@ -311,6 +333,11 @@ def build_summary(state):
     for segment in state["segments"]:
         path.append(segment["destination"])
 
+    skm = state.get("free_km", 0)
+    tkm = state.get("total_km", 0)
+    ratio = (skm / tkm * 100) if tkm > 0 else 0
+    subsidy_valid = ratio <= 20.0
+
     return {
         "origin": state["origin_id"],
         "current_airport": state["current_id"],
@@ -341,7 +368,12 @@ def build_summary(state):
 
         "remaining_budget": round(state["budget"], 2),
 
-        "finished": state["finished"]
+        "finished": state["finished"],
+
+        "subsidized_km": round(skm, 1),
+        "total_km": round(tkm, 1),
+        "subsidy_ratio": round(ratio, 1),
+        "subsidy_valid": subsidy_valid
     }
     
 # ── END ITEM 2.3 ──

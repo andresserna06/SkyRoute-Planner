@@ -55,22 +55,6 @@ def _edge_time(edge, aircraft, aircraft_config):
     return edge.distance_km * time_per_km
 
 
-def _exceeds_subsidized_limit(edge, subsidized_km, total_km):
-
-    # Rule only applies to subsidized routes
-    if edge.base_cost != 0:
-        return False
-
-    # First segment always allowed
-    if total_km == 0:
-        return False
-
-    new_total = total_km + edge.distance_km
-    new_subsidized = subsidized_km + edge.distance_km
-
-    return new_subsidized > 0.20 * new_total
-
-
 # ──────────────────────────────────────────────────────────────────────
 # ITEM 2.2.a / 2.2.b — DFS with pruning (orienteering, ~30 nodes feasible)
 #   Maximises destinations while respecting budget (2.2.a) or time (2.2.b)
@@ -90,9 +74,7 @@ def _dfs_max_coverage(
     criterion,
     aircraft_config,
     preferred_set,
-    all_aircraft_types=None,
-    subsidized_km=0.0,
-    total_km=0.0
+    all_aircraft_types=None
 ):
 
     if all_aircraft_types is None:
@@ -106,7 +88,7 @@ def _dfs_max_coverage(
             list(segments),
             budget_spent,
             time_spent_min,
-            set(aircraft_used)
+            set(aircraft_used),
         )
 
     best = (
@@ -114,7 +96,7 @@ def _dfs_max_coverage(
         list(segments),
         budget_spent,
         time_spent_min,
-        set(aircraft_used)
+        set(aircraft_used),
     )
 
     for edge in current.adjacencies:
@@ -124,124 +106,111 @@ def _dfs_max_coverage(
         if destination_id in visited:
             continue
 
-        chosen_aircraft = _pick_aircraft(
-            edge,
-            criterion,
-            aircraft_config,
-            preferred_set
-        )
+        # Try ALL valid aircraft for this edge (not just the fastest/cheapest)
+        valid_aircraft = [
+            a for a in edge.aircraft
+            if not preferred_set or a in preferred_set
+        ]
 
-        if chosen_aircraft is None:
+        if not valid_aircraft:
             continue
 
-        edge_cost = _edge_cost(
-            edge,
-            chosen_aircraft,
-            aircraft_config
-        )
+        for chosen_aircraft in valid_aircraft:
 
-        edge_time_min = _edge_time(
-            edge,
-            chosen_aircraft,
-            aircraft_config
-        )
-
-        # Enforce subsidized route limit
-        if _exceeds_subsidized_limit(
-            edge,
-            subsidized_km,
-            total_km
-        ):
-            continue
-
-        new_total_km = total_km + edge.distance_km
-
-        new_subsidized_km = subsidized_km + (
-            edge.distance_km
-            if edge.base_cost == 0 else 0
-        )
-
-        new_budget = budget_spent + edge_cost
-        new_time_min = time_spent_min + edge_time_min
-
-        # Resource constraints
-        if (
-            new_budget > budget_limit or
-            new_time_min > time_limit_min
-        ):
-            continue
-
-        # Track aircraft diversity
-        new_aircraft_used = set(aircraft_used)
-        new_aircraft_used.add(chosen_aircraft)
-
-        # Track visited airports
-        new_visited = set(visited)
-        new_visited.add(destination_id)
-
-        # Build segment
-        new_segments = list(segments)
-
-        new_segments.append({
-            "origin": current_id,
-            "destination": destination_id,
-            "aircraft": chosen_aircraft,
-
-            "distance_km": edge.distance_km,
-
-            "cost": round(edge_cost, 2),
-
-            "time_min": round(edge_time_min, 2),
-
-            "time_hours": round(
-                edge_time_min / 60.0,
-                2
+            edge_cost = _edge_cost(
+                edge,
+                chosen_aircraft,
+                aircraft_config
             )
-        })
 
-        # Recursive DFS
-        result = _dfs_max_coverage(
-            graph,
-            destination_id,
-            new_visited,
-            new_budget,
-            new_time_min,
-            budget_limit,
-            time_limit_min,
-            new_aircraft_used,
-            new_segments,
-            criterion,
-            aircraft_config,
-            preferred_set,
-            all_aircraft_types,
-            new_subsidized_km,
-            new_total_km
-        )
+            edge_time_min = _edge_time(
+                edge,
+                chosen_aircraft,
+                aircraft_config
+            )
 
-        # Priorities:
-        # 1. Aircraft diversity
-        # 2. Destination count
-        # 3. Lower resource usage
+            new_budget = budget_spent + edge_cost
+            new_time_min = time_spent_min + edge_time_min
 
-        result_uses_all = all_aircraft_types.issubset(result[4])
-        best_uses_all = all_aircraft_types.issubset(best[4])
+            # Resource constraints
+            if (
+                new_budget > budget_limit or
+                new_time_min > time_limit_min
+            ):
+                continue
 
-        if result_uses_all and not best_uses_all:
-            best = result
+            # Track aircraft diversity
+            new_aircraft_used = set(aircraft_used)
+            new_aircraft_used.add(chosen_aircraft)
 
-        elif best_uses_all and not result_uses_all:
-            pass
+            # Track visited airports
+            new_visited = set(visited)
+            new_visited.add(destination_id)
 
-        elif result[0] > best[0]:
-            best = result
+            # Build segment
+            new_segments = list(segments)
 
-        elif result[0] == best[0]:
+            new_segments.append({
+                "origin": current_id,
+                "destination": destination_id,
+                "aircraft": chosen_aircraft,
 
-            if criterion == "budget" and result[2] < best[2]:
+                "distance_km": edge.distance_km,
+
+                "cost": round(edge_cost, 2),
+
+                "time_min": round(edge_time_min, 2),
+
+                "time_hours": round(
+                    edge_time_min / 60.0,
+                    2
+                ),
+
+                "subsidized": edge.base_cost == 0,
+                "destination_is_hub": edge.destination_vertex.is_hub
+            })
+
+            # Recursive DFS
+            result = _dfs_max_coverage(
+                graph,
+                destination_id,
+                new_visited,
+                new_budget,
+                new_time_min,
+                budget_limit,
+                time_limit_min,
+                new_aircraft_used,
+                new_segments,
+                criterion,
+                aircraft_config,
+                preferred_set,
+                all_aircraft_types,
+            )
+
+            # Priorities:
+            # 1. Destination count (primary)
+            # 2. Aircraft diversity (tie-breaker)
+            # 3. Lower resource usage (second tie-breaker)
+
+            if result[0] > best[0]:
                 best = result
 
-            elif criterion == "time" and result[3] < best[3]:
-                best = result
+            elif result[0] == best[0]:
+
+                result_uses_all = all_aircraft_types.issubset(result[4])
+                best_uses_all = all_aircraft_types.issubset(best[4])
+
+                if result_uses_all and not best_uses_all:
+                    best = result
+
+                elif best_uses_all and not result_uses_all:
+                    pass
+
+                elif criterion == "budget" and result[2] < best[2]:
+                    best = result
+
+                elif criterion == "time" and result[3] < best[3]:
+                    best = result
 
     return best
 
@@ -285,7 +254,7 @@ def propose_max_coverage_by_budget(
         segments,
         total_cost,
         total_time_min,
-        aircraft_used
+        aircraft_used,
     ) = _dfs_max_coverage(
         graph,
         origin_id,
@@ -313,10 +282,7 @@ def propose_max_coverage_by_budget(
             "total_time_hours": 0.0,
             "aircraft_used": [],
             "path": [origin_id],
-            "note": (
-                "No additional destinations reachable "
-                "within the given budget and time."
-            )
+            "note": "No valid route found within budget."
         }
 
     path = [origin_id]
@@ -341,10 +307,13 @@ def propose_max_coverage_by_budget(
             2
         ),
 
-        "aircraft_used": list(aircraft_used),
+        "aircraft_used": sorted(aircraft_used),
 
-        "path": path
+        "path": path,
     }
+
+
+# ── END ITEM 2.2.a ──
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -386,7 +355,7 @@ def propose_max_coverage_by_time(
         segments,
         total_cost,
         total_time_min,
-        aircraft_used
+        aircraft_used,
     ) = _dfs_max_coverage(
         graph,
         origin_id,
@@ -414,10 +383,7 @@ def propose_max_coverage_by_time(
             "total_time_hours": 0.0,
             "aircraft_used": [],
             "path": [origin_id],
-            "note": (
-                "No additional destinations reachable "
-                "within the given time and budget."
-            )
+            "note": "No valid route found within available time."
         }
 
     path = [origin_id]
@@ -444,13 +410,11 @@ def propose_max_coverage_by_time(
 
         "aircraft_used": list(aircraft_used),
 
-        "path": path
+        "path": path,
     }
 
 
-# ──────────────────────────────────────────────────────────────────────
-# ITEM 2.2.c — Dijkstra helpers: weight function (cost/time/distance) + edge filter (secondary toggle)
-# ──────────────────────────────────────────────────────────────────────
+# ── END ITEM 2.2.b ──
 
 def _criterion_weight_fn(
     criterion,
@@ -492,16 +456,14 @@ def _criterion_weight_fn(
     return weight_fn
 
 
-def _criterion_edge_filter(include_secondary):
+def _criterion_edge_filter(include_secondary, final_destination_id=None):
 
     def edge_filter(edge):
-
-        if (
-            not include_secondary and
-            not edge.destination_vertex.is_hub
-        ):
-            return False
-
+        if not include_secondary:
+            dest = edge.destination_vertex
+            is_final = (dest.id == final_destination_id)
+            if not dest.is_hub and not is_final:
+                return False
         return True
 
     return edge_filter
@@ -545,7 +507,7 @@ def find_best_routes(
     )
 
     edge_filter = _criterion_edge_filter(
-        include_secondary
+        include_secondary, final_destination_id=destination_id
     )
 
     results = []
@@ -593,7 +555,7 @@ def find_best_routes(
             results.append({
                 "criterion": normalized,
                 "success": False,
-                "error": "No valid route found."
+                "error": "No valid route found for the selected criteria and filters."
             })
 
             continue
@@ -632,6 +594,14 @@ def find_best_routes(
                 "distance_km": (
                     edge_obj.distance_km
                     if edge_obj else 0
+                ),
+                "subsidized": (
+                    edge_obj.base_cost == 0
+                    if edge_obj else False
+                ),
+                "destination_is_hub": (
+                    edge_obj.destination_vertex.is_hub
+                    if edge_obj else False
                 )
             }
 
@@ -664,7 +634,7 @@ def find_best_routes(
             "criterion": normalized,
             "success": True,
             "path": path,
-            "segments": built_segments
+            "segments": built_segments,
         }
 
         if normalized == "distance":

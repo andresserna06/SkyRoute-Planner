@@ -197,7 +197,7 @@ def main():
         run_tests()
         return
 
-    graph = load_from_json(os.path.join(_BASE, "data/air_network.json"))
+    graph = load_from_json(os.path.join(_BASE, "data/skyroute_network.json"))
     print(f"SkyRoute Planner loaded: {len(graph.vertices)} airports, "
           f"{sum(len(v.adjacencies) for v in graph.vertices)} routes.\n")
 
