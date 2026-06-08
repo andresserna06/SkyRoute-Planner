@@ -1,9 +1,12 @@
+# ── ITEM 2.1 — JSON parser → Graph builder: nodes, edges, aircraft config ──
+
 import json
-from models.vertex import Vertex
-from models.edge import Edge
-from models.graph import Graph
+from backend.models.vertex import Vertex
+from backend.models.edge import Edge
+from backend.models.graph import Graph
 
 
+# Default aircraft config used when JSON does not provide it
 DEFAULT_AIRCRAFT_CONFIG = {
     "Avión Comercial": {"costPerKm": 0.18, "timePerKm": 0.7},
     "Jet Regional": {"costPerKm": 0.25, "timePerKm": 1.1},
@@ -47,6 +50,7 @@ def build_graph_from_dict(data):
             raise ValueError(f"Route references unknown destination airport: '{destination_id}'")
 
         edge = Edge(
+            origin_vertex=origin,
             destination_vertex=destination,
             distance_km=item["distanceKm"],
             aircraft=item.get("aircraft", []),
@@ -56,18 +60,26 @@ def build_graph_from_dict(data):
         origin.add_adjacency(edge)
 
     # Load aircraft config from JSON or fall back to defaults
-    config = data.get("aircraftConfig") or data.get("configuracionGlobal", {}).get("aeronaves") or data.get("config", {}).get("aircraft")
+    config = (
+        data.get("aircraftConfig")
+        or data.get("aircraft_config")
+        or (data.get("config") or {}).get("aircraft")
+        or (data.get("configuracionGlobal") or {}).get("aeronaves")
+    )
     if config:
         for name, values in config.items():
             graph.aircraft_config[name] = {
-                "costPerKm": values.get("costPerKm") or values.get("costoKm", 0.18),
-                "timePerKm": values.get("timePerKm") or values.get("tiempoKm", 0.7),
+                "costPerKm": values["costPerKm"] if "costPerKm" in values else values.get("costoKm", DEFAULT_AIRCRAFT_CONFIG.get(name, {}).get("costPerKm", 0.18)),
+                "timePerKm": values["timePerKm"] if "timePerKm" in values else values.get("tiempoKm", DEFAULT_AIRCRAFT_CONFIG.get(name, {}).get("timePerKm", 0.7)),
             }
     else:
         graph.aircraft_config = dict(DEFAULT_AIRCRAFT_CONFIG)
 
-    # Store full global config for R2.3
-    graph.global_config = data.get("aircraftConfig") or data.get("configuracionGlobal", {})
+    graph.global_config = (
+        data.get("aircraftConfig")
+        or data.get("aircraft_config")
+        or data.get("configuracionGlobal", {})
+    )
 
     return graph
 
@@ -77,3 +89,5 @@ def load_from_json(file_path):
     with open(file_path, encoding="utf-8") as f:
         data = json.load(f)
     return build_graph_from_dict(data)
+
+# ── END ITEM 2.1 ──

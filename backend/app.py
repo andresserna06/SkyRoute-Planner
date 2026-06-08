@@ -1,14 +1,18 @@
 # SkyRoute Planner — Main entry point
 # Usage: python app.py (interactive) or python app.py --test
 
+import os
 import sys
-from services.graphService import load_from_json
-from services.itineraryService import (
+
+_BASE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(_BASE, ".."))
+
+from backend.services.graphService import load_from_json
+from backend.services.itineraryService import (
     propose_max_coverage_by_budget,
     propose_max_coverage_by_time,
     find_best_routes,
 )
-from services.dynamicService import run_dynamic_itinerary
 
 
 def list_airports(graph):
@@ -145,7 +149,7 @@ def run_interactive(graph):
 def run_tests():
     # Run pre-defined test cases for R2.2 validation
     print("Loading graph from data/air_network.json ...")
-    graph = load_from_json("data/air_network.json")
+    graph = load_from_json(os.path.join(_BASE, "data/air_network.json"))
     print(f"Loaded {len(graph.vertices)} airports.\n")
 
     # ── Test 1: Proposal A — Budget from BOG ──
@@ -193,7 +197,7 @@ def main():
         run_tests()
         return
 
-    graph = load_from_json("data/air_network.json")
+    graph = load_from_json(os.path.join(_BASE, "data/skyroute_network.json"))
     print(f"SkyRoute Planner loaded: {len(graph.vertices)} airports, "
           f"{sum(len(v.adjacencies) for v in graph.vertices)} routes.\n")
 
