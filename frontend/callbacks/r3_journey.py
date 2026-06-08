@@ -62,7 +62,27 @@ def register(app):
             if flight_val is None:
                 raise dash.exceptions.PreventUpdate
             journey_data["blocked_edges"] = blocked_edges_data or []
-            journey_data["pending_flight"] = int(flight_val)
+            flight_id = int(flight_val)
+            journey_data["pending_flight"] = flight_id
+
+            # Lock destination and aircraft NOW, before the options list can change
+            # due to edge blocking during animation.
+            from backend.services.dynamicService import _list_available_flights
+            vertex = g.get_vertex(journey_data["current_id"])
+            if vertex:
+                opts = _list_available_flights(
+                    vertex,
+                    journey_data["visited"],
+                    g.aircraft_config,
+                    journey_data["free_km"],
+                    journey_data["total_km"],
+                    journey_data["budget"],
+                    journey_data["blocked_edges"],
+                )
+                if flight_id < len(opts):
+                    journey_data["pending_destination"] = opts[flight_id]["destination"]
+                    journey_data["pending_aircraft"]    = opts[flight_id]["aircraft"]
+
             journey_data["in_transit"] = True
             journey_data["transit_ticks"] = 0
             journey_data["show_activities"] = False
@@ -81,6 +101,7 @@ def register(app):
                 # 1. Procesar actividades opcionales seleccionadas
                 selected = selected_activities or []
                 journey_data.setdefault("activities_done", [])
+                journey_data.setdefault("payment_warnings", [])
                 for idx_str in selected:
                     result = do_optional_activity(g, journey_data, int(idx_str))
                     if result.get("success"):
@@ -90,6 +111,24 @@ def register(app):
                             "cost": result["cost_usd"],
                             "duration_min": result["duration_min"],
                         })
+                        # Propagate any obligatory charge warnings triggered by this activity
+                        if result.get("payment_warning"):
+                            journey_data["payment_warnings"].append(result["payment_warning"])
+                    else:
+                        # Activity was rejected — inform the traveler explicitly
+                        act_name = "Actividad"
+                        try:
+                            vertex_tmp = g.get_vertex(journey_data["current_id"])
+                            acts_tmp = getattr(vertex_tmp, "activities", []) or []
+                            idx_int = int(idx_str)
+                            if idx_int < len(acts_tmp):
+                                act_name = acts_tmp[idx_int].get("name", act_name)
+                        except Exception:
+                            pass
+                        journey_data["payment_warnings"].append(
+                            result.get("error") or
+                            f"No se pudo realizar '{act_name}': tiempo o fondos insuficientes."
+                        )
 
                 # 2. Avanzar tiempo al mínimo de estadía si hay tiempo libre
                 arrival_time_h  = journey_data.get("arrival_time_h", 0.0)

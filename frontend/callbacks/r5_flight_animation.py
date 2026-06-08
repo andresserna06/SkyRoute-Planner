@@ -60,41 +60,39 @@ def register(app):
         blocked     = blocked_edges or []
         journey_data["blocked_edges"] = blocked
 
-        from backend.services.dynamicService import _list_available_flights
-        vertex  = g.get_vertex(origin)
-        options = _list_available_flights(
-            vertex,
-            journey_data["visited"],
-            g.aircraft_config,
-            journey_data["free_km"],
-            journey_data["total_km"],
-            journey_data["budget"],
-            blocked,
-        )
-
-        destination = options[flight_id]["destination"] if flight_id < len(options) else "?"
-        aircraft    = options[flight_id]["aircraft"]    if flight_id < len(options) else "?"
+        # Use the destination and aircraft locked at flight selection time.
+        # Never re-derive from options list — blocked edges change the list order,
+        # which would silently reroute to a different airport.
+        destination = journey_data.get("pending_destination", "?")
+        aircraft    = journey_data.get("pending_aircraft",    "?")
         title       = f"{origin} -> {destination}  ·  {aircraft}"
 
         bar_style["width"] = f"{pct}%"
 
-        # Check if edge was blocked mid-flight
+        # Check if edge was blocked mid-flight — return traveler to origin
         edge_key = f"{origin}->{destination}"
         if edge_key in blocked:
-            journey_data["in_transit"]     = False
-            journey_data["pending_flight"] = None
+            journey_data["in_transit"]        = False
+            journey_data["pending_flight"]    = None
+            journey_data["pending_destination"] = None
+            journey_data["pending_aircraft"]  = None
+            journey_data["current_id"]        = origin   # guarantee stay at origin
+            journey_data["show_activities"]   = False
             journey_data["reroute_notice"] = (
-                f"Route {origin}->{destination} interrupted. Returning to {origin}."
+                f"Ruta {origin}→{destination} interrumpida. "
+                f"El viajero permanece en {origin}."
             )
-            return True, None, journey_data, title, bar_style, "Flight interrupted."
+            return True, None, journey_data, title, bar_style, "Vuelo interrumpido."
 
         # Transit complete
         if tick >= total:
             choose_flight(g, journey_data, flight_id)
-            journey_data["in_transit"]      = False
-            journey_data["pending_flight"]  = None
-            journey_data["show_activities"] = True
-            return True, None, journey_data, title, bar_style, "Arrived!"
+            journey_data["in_transit"]        = False
+            journey_data["pending_flight"]    = None
+            journey_data["pending_destination"] = None
+            journey_data["pending_aircraft"]  = None
+            journey_data["show_activities"]   = True
+            return True, None, journey_data, title, bar_style, "¡Llegaste!"
 
         progress_data["tick"] = tick
         return False, progress_data, dash.no_update, title, bar_style, f"In transit... {pct}%"

@@ -249,9 +249,12 @@ def get_optional_activities(graph, state):
     remaining_window_h = max(0.0, available_until_h - current_time_h)
 
     enriched = []
+    # Simulate time consumption sequentially so that fits_in_window is accurate
+    # when multiple activities might be selected together.
+    simulated_time_h = current_time_h
     for idx, act in enumerate(activities):
         duration_h = act.get("durationMin", 0) / 60.0
-        fits = duration_h <= remaining_window_h
+        fits = (simulated_time_h + duration_h) <= available_until_h
         enriched.append({
             "id": idx,
             "name": act.get("name", "Activity"),
@@ -259,6 +262,10 @@ def get_optional_activities(graph, state):
             "cost_usd": act.get("costUSD", 0),
             "fits_in_window": fits,
         })
+        if fits:
+            # Advance simulated clock so subsequent activities are evaluated
+            # against the remaining window, not the full window.
+            simulated_time_h += duration_h
 
     return {
         "success": True,
