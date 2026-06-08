@@ -41,7 +41,7 @@ def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km,
             cost = _edge_cost(edge, aircraft, aircraft_config)
             time_min = _edge_time(edge, aircraft, aircraft_config)
 
-            if cost <= budget:
+            if cost <= budget and budget - cost >= 0:
                 options.append({
                     "_edge": edge,
                     "destination": dest_id,
@@ -164,6 +164,14 @@ def choose_flight(graph, state, flight_id):
     traveler.last_accommodation = state["last_accommodation_h"]
     traveler.current_location = vertex
 
+    if state["budget"] < cost:
+        return {
+            "success": False,
+            "error": (
+                f"Fondos insuficientes para este vuelo. "
+                f"Costo: ${cost:.2f} — Presupuesto disponible: ${state['budget']:.2f}."
+            ),
+        }
     state["budget"] = round(state["budget"] - cost, 2)
     traveler.budget = state["budget"]
 
@@ -194,6 +202,11 @@ def choose_flight(graph, state, flight_id):
     state["time_min"] = round(traveler.current_time * 60.0, 2)
     state["arrival_time_h"] = round(traveler.arrival_time, 4)
     state["minimum_stay_h"] = round(edge.minimum_stay / 60.0, 4)
+
+    # Propagate insufficient-funds warnings for mid-flight meals
+    if getattr(traveler, "flight_food_error", None):
+        state.setdefault("payment_warnings", [])
+        state["payment_warnings"].append(traveler.flight_food_error)
 
     state["total_km"] += edge.distance_km
     if edge.base_cost == 0:
@@ -323,7 +336,7 @@ def do_optional_activity(graph, state, activity_index):
     traveler.last_accommodation = state["last_accommodation_h"]
     traveler.current_location = vertex
 
-    traveler.check_obligatory(vertex)
+    oblig_result = traveler.check_obligatory(vertex)
 
     obligatory_delta = round(traveler.total_cost, 2)
     state["budget"] = round(traveler.budget, 2)
@@ -333,6 +346,11 @@ def do_optional_activity(graph, state, activity_index):
     state["last_food_h"] = traveler.last_food
     state["last_accommodation_h"] = traveler.last_accommodation
 
+    # Propagate insufficient-funds warnings for obligatory charges
+    if not oblig_result.get("success"):
+        state.setdefault("payment_warnings", [])
+        state["payment_warnings"].append(oblig_result["error"])
+
     return {
         "success": True,
         "activity_name": activity.get("name"),
@@ -340,6 +358,7 @@ def do_optional_activity(graph, state, activity_index):
         "duration_min": activity.get("durationMin"),
         "obligatory_delta": obligatory_delta,
         "remaining_budget": round(state["budget"], 2),
+        "payment_warning": oblig_result.get("error", ""),
     }
 
 
