@@ -1,3 +1,5 @@
+# ── ITEM 2.1 — Dashboard theme colours, layout presets, stat chips, reusable UI styles ──
+
 from dash import html
 
 
@@ -84,3 +86,5 @@ def legend_row(swatch_style, text):
     return html.Div(style={"display": "flex", "alignItems": "center", "gap": "10px", "marginBottom": "9px"},
                     children=[html.Div(style={**swatch_style, "flexShrink": 0}),
                               html.Span(text, style={"fontSize": "13px", "color": COLORS["text_dim"]})])
+
+# ── END ITEM 2.1 ──

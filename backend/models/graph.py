@@ -1,3 +1,5 @@
+# ── ITEM 2.1 — Graph structure (adjacency list + vertex map) + matplotlib visualization ──
+
 import math
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -5,21 +7,25 @@ import matplotlib.patches as mpatches
 
 
 class Graph:
+    # Directed weighted graph built from scratch
 
     def __init__(self):
-        self.vertices = []
-        self._map = {}
-        self.aircraft_config = {}
-        self.global_config = {}
+        self.vertices = []          # List of all Vertex objects
+        self._map = {}              # Fast lookup: IATA code -> Vertex
+        self.aircraft_config = {}   # Aircraft speed/cost configuration
+        self.global_config = {}     # Global configuration from JSON
 
     def add_vertex(self, vertex):
+        # Add an airport node to the graph
         self.vertices.append(vertex)
         self._map[vertex.id] = vertex
 
     def get_vertex(self, id):
+        # Look up an airport by its IATA code
         return self._map.get(id)
 
     def print_graph(self):
+        # Print the full network: airports and their outgoing routes
         hubs = sum(1 for v in self.vertices if v.is_hub)
         print(f"=== SkyRoute Network - {len(self.vertices)} airports ({hubs} hubs) ===\n")
         for v in self.vertices:
@@ -30,10 +36,11 @@ class Graph:
                 print(f"       -> {a.destination_vertex.id:4s}  {a.distance_km:>6.0f} km  [{aircraft_str}]")
         print()
 
+    # ── ITEM 2.2.c — Dijkstra's algorithm (weighted shortest path, custom weight_fn + edge_filter) ──
+
     def dijkstra(self, origin_id, destination_id, weight_func=None, edge_filter=None, criterion="distance"):
         # Dijkstra's algorithm: finds min-weight path in a directed graph
-        # with non-negative edges. Uses dist/pred tables, selects the
-        # unvisited vertex with smallest distance at each step.
+        # with non-negative edges
         if weight_func is None:
             weight_func = lambda e: e.getPeso()
         if edge_filter is None:
@@ -42,6 +49,7 @@ class Graph:
         # Get all vertex identifiers
         all_ids = [v.id for v in self.vertices]
 
+        # Distance and predecessor tables
         dist = {v: math.inf for v in all_ids}
         pred = {v: None for v in all_ids}
         dist[origin_id] = 0
@@ -51,15 +59,22 @@ class Graph:
         # Quick lookup: id -> Vertex object
         vertex_map = {v.id: v for v in self.vertices}
 
+        # print("=== Initial iteration ===")
+        # for v in all_ids:
+        #     print(f"{v}: ({'∞' if dist[v] == math.inf else dist[v]}, {pred[v]})")
+        # print()
+
         while unvisited:
             # Select the unvisited vertex with the smallest distance
             u = min(unvisited, key=lambda v: dist[v])
             if dist[u] == math.inf:
                 break
 
+            # print(f"Processing vertex {u} with distance {dist[u]}")
             unvisited.remove(u)
 
             if u == destination_id:
+                # print(f"\nDestination {destination_id} reached. Search complete.\n")
                 break
 
             # Relax edges using the Edge structure
@@ -73,7 +88,13 @@ class Graph:
                     if new_dist < dist[v]:
                         dist[v] = new_dist
                         pred[v] = u
+                        # print(f"  Updated {v}: comes from {u}, new cost = {new_dist}")
 
+            # print("\nCurrent labels:")
+            #for v in all_ids:
+                #cost = "∞" if dist[v] == math.inf else dist[v]
+                # print(f"{v}: ({cost}, {pred[v]})")
+            # print()
 
         # Reconstruct the shortest path
         path = []
@@ -82,9 +103,16 @@ class Graph:
             path.insert(0, current)
             current = pred[current]
 
+        # print(f"Shortest path from {origin_id} to {destination_id}: {' → '.join(str(n) for n in path)}")
+        # print(f"Total {criterion}: {dist[destination_id]}")
         return dist, pred, path
 
+    # ── END ITEM 2.2.c ──
+
+    # ── ITEM 2.1 — matplotlib visualization: node layout, hub/secondary colors, click-to-info ──
+
     def visualize(self):
+        # Render the network with matplotlib and NetworkX
         G = nx.DiGraph()
 
         for v in self.vertices:
@@ -95,6 +123,7 @@ class Graph:
             for a in v.adjacencies:
                 G.add_edge(v.id, a.destination_vertex.id)
 
+                # Short aircraft codes: C=Commercial, R=Regional, H=Propeller
                 abbrevs = []
                 for aircraft in a.aircraft:
                     if "Comercial" in aircraft or "Commercial" in aircraft:
@@ -109,6 +138,7 @@ class Graph:
 
         pos = nx.spring_layout(G, seed=42, k=1.8)
 
+        # Node styling: hub = orange, secondary = blue
         node_list = [v.id for v in self.vertices]
         node_colors = ["#FF8C00" if v.is_hub else "#87CEEB" for v in self.vertices]
         node_sizes  = [1300 if v.is_hub else 700 for v in self.vertices]
@@ -142,6 +172,7 @@ class Graph:
             bbox=dict(boxstyle="round,pad=0.1", fc="white", alpha=0.6)
         )
 
+        # Legend
         hub_patch = mpatches.Patch(color="#FF8C00", label="Hub airport")
         sec_patch = mpatches.Patch(color="#87CEEB", label="Secondary airport")
         ax.legend(handles=[hub_patch, sec_patch], loc="upper left", fontsize=9)
@@ -149,6 +180,7 @@ class Graph:
         ax.text(0.01, 0.01, "Aircraft codes: C = Commercial   R = Regional   H = Propeller",
                 transform=ax.transAxes, fontsize=8)
 
+        # Click annotation
         annotation = ax.annotate(
             "",
             xy=(0, 0),
@@ -161,6 +193,7 @@ class Graph:
         )
 
         def on_click(event):
+            # Show airport info when clicking a node on the matplotlib plot
             if event.inaxes != ax:
                 return
             min_dist = float("inf")
@@ -191,6 +224,37 @@ class Graph:
         plt.tight_layout()
         plt.show()
 
+    # ── END ITEM 2.1 (visualization) ──
+
     def __repr__(self):
         total_routes = sum(len(v.adjacencies) for v in self.vertices)
         return f"Graph({len(self.vertices)} airports, {total_routes} routes)"
+    
+    def block_edge(self, edge, traveler):
+        edge.is_blocked = True
+        edge_filter = lambda e: not e.is_blocked
+
+        # Caso 1: viajero en tránsito en esa arista
+        if traveler.is_flying and traveler.current_flight == edge:
+            traveler.is_flying = False
+            traveler.current_flight = None
+            traveler.current_location = edge.origin_vertex
+            dist, pred, path = self.dijkstra(
+                edge.origin_vertex.id,
+                traveler.destination,
+                edge_filter=edge_filter
+            )
+            print(f"Viajero regresado a {edge.origin_vertex.id}")
+            print(f"Nueva ruta: {' → '.join(path)}")
+
+        # Caso 2: arista bloqueada está en el itinerario planificado
+        elif traveler.planned_route and edge in traveler.planned_route:
+            dist, pred, path = self.dijkstra(
+                traveler.current_location.id,
+                traveler.destination,
+                edge_filter=edge_filter
+            )
+            traveler.planned_route = path
+            print(f"Itinerario recalculado: {' → '.join(path)}")
+
+        print(f"Ruta hacia {edge.destination_vertex.id} bloqueada.")
