@@ -98,9 +98,8 @@ def register(app):
         Output("job-result",              "children"),
         Input("journey-store",            "data"),
         Input("graph-store",              "data"),
-        Input("flight-radio",             "value"),
     )
-    def render_planner(journey_data, graph_data, selected_fid):
+    def render_planner(journey_data, graph_data):
         if not journey_data:
             return (None, SHOW, HIDE, HIDE,
                     [], HIDE, HIDE,
