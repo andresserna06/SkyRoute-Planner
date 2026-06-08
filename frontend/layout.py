@@ -21,6 +21,9 @@ def build_layout():
             dcc.Store(id="journey-store"),
             dcc.Store(id="route-highlight-store"),
             dcc.Store(id="original-graph-store"),
+            dcc.Store(id="blocked-edges-store", data=[]),
+            dcc.Store(id="flight-progress-store", data=None),
+            dcc.Interval(id="flight-interval", interval=1000, n_intervals=0, disabled=True),
 
             html.Div(style={"flexShrink": 0}, children=[
                 html.Div(style={
@@ -141,6 +144,13 @@ def build_layout():
                         "fontFamily": "Inter, Segoe UI, sans-serif", "cursor": "pointer",
                     }),
                     html.Div(id="airport-info", children=_placeholder()),
+                    html.Div(id="edge-info", style=HIDE, children=[
+                        html.Hr(style={"margin": "0 0 12px 0", "border": "none",
+                                       "borderTop": f"1px solid {COLORS['border']}"}),
+                        html.Div(id="edge-info-content"),
+                        html.Button("🚫  Bloquear ruta", id="block-edge-btn", n_clicks=0,
+                                    style={**BTN_DANGER, "width": "100%", "marginTop": "8px"}),
+                    ]),
                 ]),
 
                 cyto.Cytoscape(
@@ -269,6 +279,28 @@ def build_layout():
                                                         style={**BTN_SUCCESS, "width": "100%"}),
                                         ]),
 
+                                        # Transit section — shown while flight is in progress
+                                        html.Div(id="transit-section", style=HIDE, children=[
+                                            html.Div(style={**CARD, "borderLeft": f"3px solid {COLORS['hub']}"}, children=[
+                                                html.Div(id="transit-title",
+                                                         style={"fontSize": "13px", "fontWeight": "700",
+                                                                "color": COLORS["hub"], "marginBottom": "10px"}),
+                                                html.Div(style={
+                                                    "height": "6px", "backgroundColor": COLORS["border"],
+                                                    "borderRadius": "3px", "overflow": "hidden", "marginBottom": "8px",
+                                                }, children=[
+                                                    html.Div(id="transit-bar", style={
+                                                        "height": "100%", "width": "0%",
+                                                        "backgroundColor": COLORS["hub"],
+                                                        "borderRadius": "3px",
+                                                        "transition": "width 1s linear",
+                                                    }),
+                                                ]),
+                                                html.Div(id="transit-status",
+                                                         style={"fontSize": "11px", "color": COLORS["text_dim"]}),
+                                            ]),
+                                        ]),
+
                                         html.Div(id="flying-section", style=HIDE, children=[
                                             html.Div(id="job-section", style=HIDE, children=[
                                                 html.Div(style={**CARD, "borderLeft": f"3px solid {COLORS['warning']}"}, children=[
@@ -299,7 +331,7 @@ def build_layout():
                                                                 "cursor": "pointer", "lineHeight": "1.4"}),
                                                 html.Div(id="no-flights-msg", style=HIDE,
                                                          children=html.P("Sin vuelos disponibles.",
-                                                                          style={"fontSize": "12px", "color": COLORS["text_dim"], "margin": 0})),
+                                                                         style={"fontSize": "12px", "color": COLORS["text_dim"], "margin": 0})),
                                             ]),
 
                                             html.Div(style={
@@ -324,8 +356,8 @@ def build_layout():
 
                                         html.Div(id="arrival-section", style=HIDE, children=[
                                             html.Div(id="arrival-info"),
-                                            html.Div(id="activity-panel", style=HIDE, children=[
-                                                html.Div("Actividades opcionales",
+                                            html.Div(id="activity-panel", children=[
+                                                html.Div("Optional activities",
                                                          style={"fontSize": "12px", "fontWeight": "700",
                                                                 "color": COLORS["text"], "marginBottom": "8px"}),
                                                 dcc.Checklist(id="activity-checklist", options=[], value=[],

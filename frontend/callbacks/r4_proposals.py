@@ -1,137 +1,131 @@
+# ── 2.4 — Route interruptions: block/unblock edges, reroute, visual update ──
+
 from dash import html, Input, Output, State
 import dash
+import math
 
 from backend.services.graphService import build_graph_from_dict
-from backend.services.itineraryService import (
-    propose_max_coverage_by_budget,
-    propose_max_coverage_by_time,
-)
-from frontend.config import COLORS, CARD
-
-
-def _build_result_card(title, result, accent_color):
-    if not result["success"]:
-        return html.Div(style={**CARD, "borderLeft": f"3px solid {COLORS['error']}"}, children=[
-            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": COLORS["error"], "marginBottom": "6px"}),
-            html.P(result.get("error", "Error desconocido"), style={"fontSize": "12px", "color": COLORS["text_dim"]}),
-        ])
-
-    if "note" in result:
-        return html.Div(style={**CARD, "borderLeft": f"3px solid {COLORS['warning']}"}, children=[
-            html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": COLORS["warning"], "marginBottom": "6px"}),
-            html.P(result["note"], style={"fontSize": "12px", "color": COLORS["text_dim"]}),
-        ])
-
-    rows = []
-    for s in result["segments"]:
-        if s.get("subsidized"):
-            row_style = {"backgroundColor": "#fef2f2", "color": "#dc2626"}
-            label_suffix = " (Subsidiada)"
-        elif not s.get("destination_is_hub"):
-            row_style = {"backgroundColor": "#dbeafe", "color": "#1d4ed8"}
-            label_suffix = " (Secundario)"
-        else:
-            row_style = {}
-            label_suffix = ""
-        rows.append(html.Tr([
-            html.Td(f"{s['origin']} → {s['destination']}",
-                    style={"padding": "4px 6px", "fontSize": "11px", "fontWeight": "600", **row_style}),
-            html.Td(f"{s['aircraft']}{label_suffix}",
-                    style={"padding": "4px 6px", "fontSize": "10px", "color": COLORS["text_dim"], **row_style}),
-            html.Td(f"${s['cost']:.2f}",
-                    style={"padding": "4px 6px", "fontSize": "10px", "textAlign": "right", **row_style}),
-            html.Td(f"{s['time_min']:.1f} min",
-                    style={"padding": "4px 6px", "fontSize": "10px", "textAlign": "right", "color": COLORS["text_dim"], **row_style}),
-        ]))
-
-    return html.Div(style={**CARD, "borderLeft": f"3px solid {accent_color}"}, children=[
-        html.Div(title, style={"fontSize": "12px", "fontWeight": "700", "color": accent_color, "marginBottom": "6px"}),
-        html.Div(" → ".join(result["path"]),
-                 style={"fontSize": "13px", "fontWeight": "600", "color": COLORS["text"], "marginBottom": "8px"}),
-        html.Table(style={"width": "100%", "borderCollapse": "collapse", "marginBottom": "8px"}, children=[
-            html.Thead(html.Tr([
-                html.Th("Tramo", style={"padding": "3px 6px", "fontSize": "9px", "textAlign": "left",
-                                        "color": COLORS["text_dim"], "borderBottom": f"1px solid {COLORS['border']}"}),
-                html.Th("Aeronave", style={"padding": "3px 6px", "fontSize": "9px", "textAlign": "left",
-                                           "color": COLORS["text_dim"], "borderBottom": f"1px solid {COLORS['border']}"}),
-                html.Th("Costo", style={"padding": "3px 6px", "fontSize": "9px", "textAlign": "right",
-                                        "color": COLORS["text_dim"], "borderBottom": f"1px solid {COLORS['border']}"}),
-                html.Th("Tiempo", style={"padding": "3px 6px", "fontSize": "9px", "textAlign": "right",
-                                         "color": COLORS["text_dim"], "borderBottom": f"1px solid {COLORS['border']}"}),
-            ])),
-            html.Tbody(rows),
-        ]),
-        html.Div(f"Destinos visitados: {result['destinations_visited']}  |  "
-                 f"Costo total: ${result['total_cost']:.2f}  |  "
-                 f"Tiempo total: {result['total_time_hours']:.2f} h",
-                 style={"fontSize": "11px", "fontWeight": "600", "color": COLORS["text"], "textAlign": "right"}),
-    ])
+from frontend.config import COLORS, CARD, SHOW, HIDE
 
 
 def register(app):
 
     @app.callback(
-        Output("prop-a-origin", "options"),
-        Input("graph-store", "data"),
+        Output("edge-info",          "style"),
+        Output("edge-info-content",  "children"),
+        Output("block-edge-btn",     "children"),
+        Input("network-graph",       "tapEdgeData"),
+        Input("clear-selection",     "n_clicks"),
+        State("blocked-edges-store", "data"),
     )
-    def load_airports_a(graph_data):
-        if not graph_data:
-            raise dash.exceptions.PreventUpdate
-        g = build_graph_from_dict(graph_data)
-        return [{"label": f"{v.id} — {v.city}", "value": v.id}
-                for v in sorted(g.vertices, key=lambda x: x.id)]
+    def show_edge_info(edge_data, clear_clicks, blocked_list):
+        if dash.callback_context.triggered_id == "clear-selection" or not edge_data:
+            return HIDE, "", "Bloquear ruta"
+
+        blocked_list = blocked_list or []
+        edge_key  = f"{edge_data['source']}->{edge_data['target']}"
+        is_blocked = edge_key in blocked_list
+
+        content = html.Div([
+            html.Div(f"{edge_data['source']} -> {edge_data['target']}",
+                     style={"fontWeight": "700", "fontSize": "14px",
+                            "color": COLORS["error"] if is_blocked else COLORS["text"],
+                            "marginBottom": "4px"}),
+            html.Div(f"{edge_data['distance_km']:.0f} km  ·  {edge_data['aircraft']}",
+                     style={"fontSize": "11px", "color": COLORS["text_dim"]}),
+            html.Div("Ruta bloqueada" if is_blocked else "",
+                     style={"fontSize": "11px", "color": COLORS["error"],
+                            "marginTop": "4px", "fontWeight": "600"}),
+        ])
+
+        btn_text = "Desbloquear ruta" if is_blocked else "Bloquear ruta"
+        return SHOW, content, btn_text
 
     @app.callback(
-        Output("prop-b-origin", "options"),
-        Input("graph-store", "data"),
+        Output("blocked-edges-store", "data"),
+        Output("journey-store",       "data", allow_duplicate=True),
+        Input("block-edge-btn",       "n_clicks"),
+        State("network-graph",        "tapEdgeData"),
+        State("blocked-edges-store",  "data"),
+        State("journey-store",        "data"),
+        State("graph-store",          "data"),
+        prevent_initial_call=True,
     )
-    def load_airports_b(graph_data):
-        if not graph_data:
+    def toggle_edge(n_clicks, edge_data, blocked_list, journey_data, graph_data):
+        if not n_clicks or not edge_data or not graph_data:
             raise dash.exceptions.PreventUpdate
-        g = build_graph_from_dict(graph_data)
-        return [{"label": f"{v.id} — {v.city}", "value": v.id}
-                for v in sorted(g.vertices, key=lambda x: x.id)]
+
+        blocked_list = list(blocked_list or [])
+        origin      = edge_data["source"]
+        destination = edge_data["target"]
+        edge_key    = f"{origin}->{destination}"
+
+        # Unblock if already blocked
+        if edge_key in blocked_list:
+            blocked_list.remove(edge_key)
+            if journey_data:
+                journey_data["blocked_edges"] = blocked_list
+            return blocked_list, journey_data if journey_data else dash.no_update
+
+        # Block
+        blocked_list.append(edge_key)
+
+        if not journey_data or journey_data.get("finished", False):
+            return blocked_list, dash.no_update
+
+        journey_data["blocked_edges"] = blocked_list
+
+        # Check if blocked edge affects the current planned path
+        segments   = journey_data.get("segments", [])
+        current_id = journey_data.get("current_id")
+
+        edge_in_plan = any(
+            s["origin"] == origin and s["destination"] == destination
+            for s in segments
+        )
+
+        if edge_in_plan:
+            g = build_graph_from_dict(graph_data)
+
+            def edge_filter(e):
+                key = f"{e.origin_vertex.id}->{e.destination_vertex.id}"
+                return key not in blocked_list
+
+            if segments:
+                last_dest = segments[-1]["destination"]
+                dist, pred, path = g.dijkstra(
+                    current_id,
+                    last_dest,
+                    edge_filter=edge_filter,
+                )
+                if dist.get(last_dest, math.inf) < math.inf:
+                    journey_data["reroute_notice"] = (
+                        f"Route {origin}->{destination} blocked. "
+                        f"Rerouted: {' -> '.join(path)}"
+                    )
+                else:
+                    journey_data["reroute_notice"] = (
+                        f"Route {origin}->{destination} blocked. "
+                        f"No alternative found."
+                    )
+
+        return blocked_list, journey_data
 
     @app.callback(
-        Output("prop-a-results", "children"),
-        Input("prop-a-btn", "n_clicks"),
-        State("prop-a-origin", "value"),
-        State("prop-a-budget", "value"),
-        State("prop-a-time", "value"),
-        State("graph-store", "data"),
+        Output("network-graph", "elements", allow_duplicate=True),
+        Input("blocked-edges-store", "data"),
+        State("graph-store",         "data"),
+        prevent_initial_call=True,
     )
-    def proposal_a(n_clicks, origin, budget, time_hours, graph_data):
-        if not n_clicks or not origin or not graph_data:
+    def update_blocked_visuals(blocked_list, graph_data):
+        if not graph_data or not blocked_list:
             raise dash.exceptions.PreventUpdate
-        if budget is None:
-            return html.Div("⚠ Ingresa un presupuesto antes de calcular.",
-                            style={"fontSize": "12px", "color": COLORS["warning"], "marginTop": "8px"})
-
         g = build_graph_from_dict(graph_data)
-        budget_val = float(budget) if budget not in (None, "") else float("inf")
-        time_val = float(time_hours) if time_hours not in (None, "") else float("inf")
-
-        result = propose_max_coverage_by_budget(g, origin, budget_val, time_val)
-        return _build_result_card("$ Propuesta A — Máximo por presupuesto", result, COLORS["ok"])
-
-    @app.callback(
-        Output("prop-b-results", "children"),
-        Input("prop-b-btn", "n_clicks"),
-        State("prop-b-origin", "value"),
-        State("prop-b-time", "value"),
-        State("prop-b-budget", "value"),
-        State("graph-store", "data"),
-    )
-    def proposal_b(n_clicks, origin, time_hours, budget, graph_data):
-        if not n_clicks or not origin or not graph_data:
-            raise dash.exceptions.PreventUpdate
-        if time_hours is None:
-            return html.Div("⚠ Ingresa un tiempo disponible antes de calcular.",
-                            style={"fontSize": "12px", "color": COLORS["warning"], "marginTop": "8px"})
-
-        g = build_graph_from_dict(graph_data)
-        time_val = float(time_hours) if time_hours not in (None, "") else float("inf")
-        budget_val = float(budget) if budget not in (None, "") else float("inf")
-
-        result = propose_max_coverage_by_time(g, origin, time_val, budget_val)
-        return _build_result_card("🕐 Propuesta B — Máximo por tiempo", result, COLORS["secondary"])
+        from frontend.graph_helpers import build_elements
+        elements = build_elements(g)
+        for elem in elements:
+            if "source" in elem.get("data", {}):
+                key = f"{elem['data']['source']}->{elem['data']['target']}"
+                if key in blocked_list:
+                    elem["classes"] = "bloqueada"
+        return elements
