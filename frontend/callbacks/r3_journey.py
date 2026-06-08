@@ -14,11 +14,23 @@ from backend.services.dynamicService import (
 )
 from frontend.config import COLORS, CARD, SECTION_TITLE, SHOW, HIDE
 
+# Modal needs display:flex (not block) so the inner box centres properly
+MODAL_SHOW = {
+    "display": "flex",
+    "position": "fixed", "top": "0", "left": "0", "right": "0", "bottom": "0",
+    "backgroundColor": "rgba(0,0,0,0.5)",
+    "zIndex": "1000",
+    "justifyContent": "center",
+    "alignItems": "center",
+    "padding": "20px",
+}
+
 
 def register(app):
 
     @app.callback(
-        Output("journey-store", "data"),
+        Output("journey-store",       "data"),
+        Output("blocked-edges-store", "data", allow_duplicate=True),
         Input("start-btn",              "n_clicks"),
         Input("fly-btn",                "n_clicks"),
         Input("end-btn",                "n_clicks"),
@@ -34,6 +46,7 @@ def register(app):
         State("journey-store",          "data"),
         State("graph-store",            "data"),
         State("blocked-edges-store",    "data"),
+        prevent_initial_call=True,
     )
     def handle_journey_action(start_n, fly_n, end_n, new_n, work_n, confirm_n,
                               origin, budget, flight_val,
@@ -44,14 +57,15 @@ def register(app):
             raise dash.exceptions.PreventUpdate
 
         if tid == "new-journey-btn":
-            return None
+            # Clear both journey and blocked edges so the new trip starts clean
+            return None, []
 
         if tid == "start-btn":
             if not origin or not budget or not graph_data:
                 raise dash.exceptions.PreventUpdate
             state = create_dynamic_state(origin, float(budget))
             state["blocked_edges"] = blocked_edges_data or []
-            return state
+            return state, dash.no_update
 
         if not journey_data or not graph_data:
             raise dash.exceptions.PreventUpdate
@@ -88,7 +102,7 @@ def register(app):
             journey_data["show_activities"] = False
             # Limpiar aviso de reroute anterior
             journey_data.pop("reroute_notice", None)
-            return journey_data
+            return journey_data, dash.no_update
 
         if tid == "confirm-activities-btn":
             journey_data["blocked_edges"] = blocked_edges_data or []
@@ -167,45 +181,50 @@ def register(app):
 
                 journey_data["show_activities"] = False
 
-            return journey_data
+            return journey_data, dash.no_update
 
         if tid == "work-btn":
             if job_val is None or not hours_val:
                 raise dash.exceptions.PreventUpdate
             journey_data["blocked_edges"] = blocked_edges_data or []
-            work_at_job(g, journey_data, int(job_val), float(hours_val))
-            return journey_data
+            journey_data.pop("_job_error", None)
+            result = work_at_job(g, journey_data, int(job_val), float(hours_val))
+            if not result.get("success"):
+                journey_data["_job_error"] = result.get("error", "Error al procesar el trabajo.")
+            return journey_data, dash.no_update
 
         if tid == "end-btn":
             finish_itinerary(journey_data)
-            return journey_data
+            return journey_data, dash.no_update
 
         raise dash.exceptions.PreventUpdate
 
     @app.callback(
-        Output("journey-status",     "children"),
-        Output("setup-section",      "style"),
-        Output("flying-section",     "style"),
-        Output("complete-section",   "style"),
-        Output("flight-radio",       "options"),
-        Output("flight-radio",       "value"),
-        Output("arrival-section",    "style"),
-        Output("arrival-info",       "children"),
-        Output("job-section",        "style"),
-        Output("job-dropdown",       "options"),
-        Output("job-dropdown",       "value"),
-        Output("hours-input",        "value"),
-        Output("job-result",         "children"),
-        Output("activity-checklist", "options"),
-        Output("activity-checklist", "value"),
-        Output("transit-section",    "style"),
-        Input("journey-store",       "data"),
-        Input("graph-store",         "data"),
-        State("blocked-edges-store", "data"),
+        Output("journey-status",          "children"),
+        Output("setup-section",           "style"),
+        Output("flying-section",          "style"),
+        Output("flight-radio",            "options"),
+        Output("flight-radio",            "value"),
+        Output("arrival-section",         "style"),
+        Output("arrival-info",            "children"),
+        Output("job-section",             "style"),
+        Output("job-dropdown",            "options"),
+        Output("job-dropdown",            "value"),
+        Output("hours-input",             "value"),
+        Output("job-result",              "children"),
+        Output("activity-checklist",      "options"),
+        Output("activity-checklist",      "value"),
+        Output("transit-section",         "style"),
+        Output("journey-report",          "children"),
+        Output("journey-modal",           "style"),
+        Output("new-journey-container",   "style"),
+        Input("journey-store",            "data"),
+        Input("graph-store",              "data"),
+        State("blocked-edges-store",      "data"),
     )
     def render_planner(journey_data, graph_data, blocked_edges_data):
         if not journey_data:
-            return (None, SHOW, HIDE, HIDE, [], None, HIDE, "", HIDE, [], None, None, "", [], [], HIDE)
+            return (None, SHOW, HIDE, [], None, HIDE, "", HIDE, [], None, None, "", [], [], HIDE, None, HIDE, HIDE)
 
         finished        = journey_data.get("finished", False)
         in_transit      = journey_data.get("in_transit", False)
@@ -331,8 +350,8 @@ def register(app):
         if finished:
             s = build_summary(journey_data)
             s["initial_budget"] = initial_budget
-            report = _render_report(s)
-            return (status, HIDE, HIDE, SHOW, [], None, HIDE, "", HIDE, [], None, None, "", [], [], HIDE)
+            report = _render_report(s, g)
+            return (status, HIDE, HIDE, [], None, HIDE, "", HIDE, [], None, None, "", [], [], HIDE, report, MODAL_SHOW, SHOW)
 
         flight_opts          = []
         job_opts             = []
@@ -407,67 +426,241 @@ def register(app):
             if jobs_res.get("success") and jobs_res.get("show_jobs"):
                 for j in jobs_res.get("jobs", []):
                     job_opts.append({
-                        "label": f"{j['name']}  ·  ${j['hourly_rate']:.2f}/h  (máx {j['max_hours']} h)",
+                        "label": f"{j['name']}  ·  ${j['hourly_rate']:.2f}/h  (quedan {j['hours_remaining']:.1f} h)",
                         "value": str(j["id"]),
+                        "disabled": j["hours_remaining"] <= 0,
                     })
                 if job_opts:
                     job_visible = SHOW
-                    job_result  = "Presupuesto bajo. Trabaja para ganar más."
+                    job_result  = journey_data.get("_job_error") or "Presupuesto bajo. Trabaja para ganar más."
                 else:
                     job_result = "No hay trabajos disponibles en este aeropuerto."
 
         show_flying  = HIDE if (in_transit or show_activities) else SHOW
         show_arrival = SHOW if show_activities else HIDE
 
-        return (status, HIDE, show_flying, HIDE,
+        return (status, HIDE, show_flying,
                 flight_opts, None, show_arrival, arrival_info_content,
                 job_visible, job_opts, None, None, job_result,
-                activity_opts, activity_vals, transit_style)
+                activity_opts, activity_vals, transit_style, None, HIDE, HIDE)
+
+    @app.callback(
+        Output("journey-modal", "style", allow_duplicate=True),
+        Input("close-modal-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def close_modal(n_clicks):
+        if not n_clicks:
+            raise dash.exceptions.PreventUpdate
+        return HIDE
 
 
-def _render_report(s):
-    sections = []
+# ── ITEM 2.5 — Reporte final del viaje (R5) ──
 
-    if s.get("segments"):
-        rows = [
-            html.Div(style={**CARD, "marginBottom": "8px"}, children=[
-                html.Div(f"{seg['origin']} → {seg['destination']}",
-                         style={"fontWeight": "700", "fontSize": "12px", "marginBottom": "4px"}),
-                html.Div(f"Aeronave: {seg['aircraft']}  ·  {seg['distance_km']:.0f} km",
-                         style={"fontSize": "11px", "color": COLORS["text_dim"]}),
-                html.Div(f"Costo: ${seg['cost']:.2f}  ·  Tiempo: {seg['time_min']:.0f} min",
-                         style={"fontSize": "11px", "color": COLORS["text_dim"]}),
-            ])
-            for seg in s["segments"]
-        ]
+def _render_report(s, g=None):
+    # Builds the complete trip report with 5 sections: destinations, segments,
+    # activities, jobs, and totals. Accepts the graph to look up airport metadata.
+
+    def _vertex_info(airport_id):
+        # Returns (name, city, country) from graph if available
+        if g:
+            v = g.get_vertex(airport_id)
+            if v:
+                return v.name, v.city, v.country
+        return airport_id, "", ""
+
+    sections      = []
+    dest_log      = s.get("destination_log", [])
+    acts_done     = s.get("activities_done", [])
+    jobs_done     = s.get("jobs_done", [])
+    segments      = s.get("segments", [])
+    total_time_h  = s.get("total_time_hours", 0)
+
+    # ── Sección 1: Destinos visitados ──
+    if dest_log:
+        dest_cards = []
+        for entry in dest_log:
+            airport_id  = entry["airport_id"]
+            arrival_h   = entry.get("arrival_h")   # None for origin
+            departure_h = entry.get("departure_h")  # None for final destination
+            name, city, country = _vertex_info(airport_id)
+
+            if arrival_h is None:
+                # Origin airport — no incoming flight
+                accent     = COLORS["hub"]
+                time_label = f"Origen  ·  Salida: {departure_h or 0.0:.2f} h"
+                stay_h     = 0.0
+            elif departure_h is None:
+                # Final destination — no outgoing flight
+                stay_h     = max(0.0, total_time_h - arrival_h)
+                accent     = COLORS["ok"]
+                time_label = f"Llegada: {arrival_h:.2f} h  ·  Estadía: {stay_h:.2f} h"
+            else:
+                # Transit airport
+                stay_h     = max(0.0, departure_h - arrival_h)
+                accent     = COLORS["secondary"]
+                time_label = f"Llegada: {arrival_h:.2f} h  ·  Estadía: {stay_h:.2f} h"
+
+            # Flight cost to arrive at this airport
+            seg_cost = next(
+                (seg["cost"] for seg in segments if seg["destination"] == airport_id),
+                None,
+            )
+            # Optional activities at this airport
+            airport_acts = [a for a in acts_done if a.get("airport") == airport_id]
+            act_cost = sum(a["cost"] for a in airport_acts)
+
+            card_ch = [
+                html.Div(style={"display": "flex", "justifyContent": "space-between",
+                                "alignItems": "baseline", "marginBottom": "2px"}, children=[
+                    html.Span(airport_id, style={"fontSize": "16px", "fontWeight": "800", "color": accent}),
+                    html.Span(time_label, style={"fontSize": "10px", "color": COLORS["text_dim"]}),
+                ]),
+            ]
+            if name != airport_id:
+                card_ch.append(html.Div(
+                    name, style={"fontSize": "11px", "fontStyle": "italic",
+                                 "color": COLORS["text_dim"], "marginBottom": "2px"}))
+            if city:
+                card_ch.append(html.Div(
+                    f"{city}, {country}",
+                    style={"fontSize": "11px", "color": COLORS["text_dim"], "marginBottom": "6px"}))
+
+            # Cost breakdown for this destination
+            cost_parts = []
+            if seg_cost is not None and seg_cost > 0:
+                cost_parts.append(f"Vuelo: ${seg_cost:.2f}")
+            if act_cost > 0:
+                act_names = " / ".join(a["name"] for a in airport_acts)
+                cost_parts.append(f"Actividades ({act_names}): ${act_cost:.2f}")
+            if cost_parts:
+                card_ch.append(html.Div(
+                    "  ·  ".join(cost_parts),
+                    style={"fontSize": "11px", "fontWeight": "600", "color": COLORS["error"]},
+                ))
+
+            dest_cards.append(html.Div(
+                style={**CARD, "borderLeft": f"3px solid {accent}", "marginBottom": "6px"},
+                children=card_ch,
+            ))
+
         sections.append(html.Div([
             html.Div(f"Destinos visitados: {s.get('destinations_visited', 0)}",
                      style={**SECTION_TITLE, "marginBottom": "8px"}),
-            *rows,
+            *dest_cards,
         ]))
 
-    if s.get("jobs_done"):
-        job_rows = [
-            html.Div(style={"fontSize": "11px", "color": COLORS["text_dim"], "marginBottom": "4px"}, children=[
-                html.Span(f"{j['job_name']} en {j['airport']}  ·  ", style={"fontWeight": "600"}),
-                html.Span(f"{j['hours']} h  ·  +${j['earnings']:.2f}"),
+    # ── Sección 2: Tramos volados ──
+    if segments:
+        seg_cards = [
+            html.Div(style={**CARD, "marginBottom": "6px", "padding": "8px 12px"}, children=[
+                html.Div(style={"display": "flex", "justifyContent": "space-between"}, children=[
+                    html.Span(f"{seg['origin']} → {seg['destination']}",
+                              style={"fontWeight": "700", "fontSize": "12px"}),
+                    html.Span(f"${seg['cost']:.2f}",
+                              style={"fontWeight": "700", "fontSize": "12px", "color": COLORS["error"]}),
+                ]),
+                html.Div(
+                    f"{seg['aircraft']}  ·  {seg['distance_km']:.0f} km  ·  {seg['time_min']:.0f} min",
+                    style={"fontSize": "11px", "color": COLORS["text_dim"], "marginTop": "3px"},
+                ),
             ])
-            for j in s["jobs_done"]
+            for seg in segments
         ]
         sections.append(html.Div([
-            html.Div("Trabajos completados", style={**SECTION_TITLE, "marginBottom": "6px", "marginTop": "12px"}),
-            *job_rows,
-            html.Div(f"Total ganado: ${s.get('total_earned', 0):.2f}",
-                     style={"fontSize": "12px", "fontWeight": "700",
-                            "color": COLORS["ok"], "marginTop": "6px"}),
+            html.Div("Tramos volados", style={**SECTION_TITLE, "marginBottom": "8px", "marginTop": "12px"}),
+            *seg_cards,
         ]))
 
+    # ── Sección 3: Actividades realizadas ──
+    act_items = []
     obligatory_total = s.get("obligatory_cost_total", 0.0)
+
+    # Mandatory activities (food + accommodation) — shown as a single total
+    if obligatory_total > 0:
+        act_items.append(html.Div(
+            style={"display": "flex", "justifyContent": "space-between",
+                   "marginBottom": "6px", "alignItems": "flex-start"},
+            children=[
+                html.Div([
+                    html.Span("Comida + Alojamiento",
+                              style={"fontWeight": "600", "fontSize": "11px"}),
+                    html.Div("Obligatoria  ·  cargos acumulados durante el viaje",
+                             style={"fontSize": "10px", "color": COLORS["text_dim"]}),
+                ]),
+                html.Span(f"-${obligatory_total:.2f}",
+                          style={"fontWeight": "700", "fontSize": "12px",
+                                 "color": COLORS["error"], "whiteSpace": "nowrap"}),
+            ],
+        ))
+
+    # Optional activities — one row each
+    for a in acts_done:
+        act_items.append(html.Div(
+            style={"display": "flex", "justifyContent": "space-between",
+                   "marginBottom": "6px", "alignItems": "flex-start"},
+            children=[
+                html.Div([
+                    html.Span(a["name"], style={"fontWeight": "600", "fontSize": "11px"}),
+                    html.Div(
+                        f"Opcional  ·  {a['airport']}  ·  {a['duration_min']} min",
+                        style={"fontSize": "10px", "color": COLORS["text_dim"]},
+                    ),
+                ]),
+                html.Span(f"-${a['cost']:.2f}",
+                          style={"fontWeight": "700", "fontSize": "12px",
+                                 "color": COLORS["error"], "whiteSpace": "nowrap"}),
+            ],
+        ))
+
+    if act_items:
+        sections.append(html.Div([
+            html.Div("Actividades realizadas",
+                     style={**SECTION_TITLE, "marginBottom": "8px", "marginTop": "12px"}),
+            *act_items,
+        ]))
+
+    # ── Sección 4: Trabajos realizados ──
+    if jobs_done:
+        job_rows = [
+            html.Div(
+                style={"display": "flex", "justifyContent": "space-between",
+                       "marginBottom": "6px", "alignItems": "flex-start"},
+                children=[
+                    html.Div([
+                        html.Span(j["job_name"],
+                                  style={"fontWeight": "600", "fontSize": "11px"}),
+                        html.Div(
+                            f"{j['airport']}  ·  {j['hours']} h  ·  ${j['hourly_rate']:.2f}/h",
+                            style={"fontSize": "10px", "color": COLORS["text_dim"]},
+                        ),
+                    ]),
+                    html.Span(f"+${j['earnings']:.2f}",
+                              style={"fontWeight": "700", "fontSize": "12px",
+                                     "color": COLORS["ok"], "whiteSpace": "nowrap"}),
+                ],
+            )
+            for j in jobs_done
+        ]
+        sections.append(html.Div([
+            html.Div("Trabajos realizados",
+                     style={**SECTION_TITLE, "marginBottom": "8px", "marginTop": "12px"}),
+            *job_rows,
+            html.Div(
+                f"Total ganado: ${s.get('total_earned', 0):.2f}",
+                style={"fontSize": "12px", "fontWeight": "700",
+                       "color": COLORS["ok"], "marginTop": "4px"},
+            ),
+        ]))
+
+    # ── Sección 5: Resumen de totales ──
+    skm = s.get("subsidized_km", 0)
+    tkm = s.get("total_km", 0)
 
     totals = html.Div(
         style={**CARD, "borderLeft": f"3px solid {COLORS['hub']}", "marginTop": "14px"},
         children=[
-            html.Div("Resumen", style={**SECTION_TITLE, "marginBottom": "10px"}),
+            html.Div("Resumen del viaje", style={**SECTION_TITLE, "marginBottom": "10px"}),
             *[
                 html.Div(style={
                     "display": "flex", "justifyContent": "space-between",
@@ -477,12 +670,13 @@ def _render_report(s):
                     html.Span(value, style={"fontWeight": "700", "color": color}),
                 ])
                 for label, value, color in [
-                    ("Presupuesto inicial", f"${s.get('initial_budget', 0):.2f}",   COLORS["text"]),
-                    ("Total vuelos",        f"${s.get('total_cost', 0):.2f}",       COLORS["error"]),
-                    ("Cargos obligatorios", f"-${obligatory_total:.2f}",            COLORS["error"]),
-                    ("Ganado en trabajos",  f"+${s.get('total_earned', 0):.2f}",    COLORS["ok"]),
-                    ("Saldo final",         f"${s.get('remaining_budget', 0):.2f}", COLORS["text"]),
-                    ("Tiempo total",        f"{s.get('total_time_hours', 0):.1f} h",COLORS["text"]),
+                    ("Presupuesto inicial",    f"${s.get('initial_budget', 0):.2f}",     COLORS["text"]),
+                    ("Total vuelos",           f"-${s.get('total_cost', 0):.2f}",         COLORS["error"]),
+                    ("Cargos obligatorios",    f"-${obligatory_total:.2f}",               COLORS["error"]),
+                    ("Ganado en trabajos",     f"+${s.get('total_earned', 0):.2f}",       COLORS["ok"]),
+                    ("Saldo final",            f"${s.get('remaining_budget', 0):.2f}",    COLORS["text"]),
+                    ("Tiempo total del viaje", f"{s.get('total_time_hours', 0):.1f} h",   COLORS["text"]),
+                    ("Destinos visitados",     str(s.get("destinations_visited", 0)),      COLORS["text"]),
                 ]
             ],
             html.Div(style={"borderTop": f"1px solid {COLORS['border']}", "margin": "8px 0 6px"}),
@@ -490,8 +684,7 @@ def _render_report(s):
                             "marginBottom": "5px", "fontSize": "12px"}, children=[
                 html.Span("Dist. subsidiada", style={"color": COLORS["text_dim"]}),
                 html.Span(
-                    f"{s.get('subsidized_km', 0):.0f} / {s.get('total_km', 0):.0f} km"
-                    f" ({s.get('subsidy_ratio', 0):.1f}%)",
+                    f"{skm:.0f} / {tkm:.0f} km ({s.get('subsidy_ratio', 0):.1f}%)",
                     style={"fontWeight": "700"},
                 ),
             ]),
@@ -501,12 +694,14 @@ def _render_report(s):
                 html.Span(
                     "✔ Cumple" if s.get("subsidy_valid") else "✘ Excede",
                     style={"fontWeight": "700",
-                           "color": "#16a34a" if s.get("subsidy_valid") else "#dc2626"},
+                           "color": COLORS["ok"] if s.get("subsidy_valid") else COLORS["error"]},
                 ),
             ]),
         ],
     )
 
     return html.Div([*sections, totals])
+
+# ── END ITEM 2.5 ──
 
 # ── END ITEM 2.3.a / 2.3.b / 2.3.c ──

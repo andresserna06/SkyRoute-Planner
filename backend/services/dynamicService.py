@@ -72,6 +72,8 @@ def create_dynamic_state(origin_id, initial_budget):
         "free_km": 0.0,
         "total_km": 0.0,
         "jobs_done": [],
+        "jobs_hours_worked": {},
+        "destination_log": [],
         "total_earned": 0.0,
         "obligatory_cost_total": 0.0,
         "last_food_h": 0.0,
@@ -173,6 +175,20 @@ def choose_flight(graph, state, flight_id):
     state["budget"] = round(state["budget"] - cost, 2)
     traveler.budget = state["budget"]
 
+    # ── ITEM 2.5 — Record departure from current airport before the flight ──
+    curr_departure_h = round(traveler.current_time, 4)
+    log = state.setdefault("destination_log", [])
+    recorded = False
+    for entry in reversed(log):
+        if entry["airport_id"] == state["current_id"]:
+            if entry.get("departure_h") is None:
+                entry["departure_h"] = curr_departure_h
+            recorded = True
+            break
+    if not recorded:
+        # Origin airport departing for the first time
+        log.append({"airport_id": state["current_id"], "arrival_h": None, "departure_h": curr_departure_h})
+
     time_per_km = graph.aircraft_config[aircraft]["timePerKm"]
     traveler.check_flight(edge, time_per_km)
 
@@ -212,6 +228,13 @@ def choose_flight(graph, state, flight_id):
     })
 
     state["current_id"] = destination
+
+    # ── ITEM 2.5 — Record arrival at new destination ──
+    state["destination_log"].append({
+        "airport_id": destination,
+        "arrival_h": round(traveler.arrival_time, 4),
+        "departure_h": None,
+    })
 
     # ── ITEM 2.3.a — Set arrival state for activity panel ──
     state["in_transit"] = False
@@ -375,15 +398,19 @@ def get_available_jobs(graph, state):
     if not raw:
         return {"success": True, "show_jobs": True, "jobs": [], "reason": "No jobs available at this airport."}
 
-    jobs_out = [
-        {
+    jobs_out = []
+    for idx, j in enumerate(raw):
+        max_hours = j.get("maxHours", 8)
+        key = f"{state['current_id']}_{idx}"
+        hours_worked = state.get("jobs_hours_worked", {}).get(key, 0.0)
+        hours_remaining = round(max(0.0, max_hours - hours_worked), 2)
+        jobs_out.append({
             "id": idx,
             "name": j.get("name", "Job"),
             "hourly_rate": j.get("hourlyRate", 0),
-            "max_hours": j.get("maxHours", 8),
-        }
-        for idx, j in enumerate(raw)
-    ]
+            "max_hours": max_hours,
+            "hours_remaining": hours_remaining,
+        })
 
     return {"success": True, "show_jobs": True, "jobs": jobs_out}
 
@@ -403,8 +430,15 @@ def work_at_job(graph, state, job_index, hours):
 
     job = raw[job_index]
     max_hours = job.get("maxHours", 8)
-    if hours <= 0 or hours > max_hours:
-        return {"success": False, "error": f"Hours must be between 0.5 and {max_hours}."}
+
+    key = f"{state['current_id']}_{job_index}"
+    hours_worked = state.get("jobs_hours_worked", {}).get(key, 0.0)
+    remaining = round(max_hours - hours_worked, 2)
+
+    if hours <= 0 or hours > remaining:
+        if remaining <= 0:
+            return {"success": False, "error": "Ya completaste las horas máximas de este trabajo."}
+        return {"success": False, "error": f"Solo quedan {remaining:.1f} h disponibles para este trabajo."}
 
     earnings = round(job.get("hourlyRate", 0) * hours, 2)
 
@@ -418,6 +452,7 @@ def work_at_job(graph, state, job_index, hours):
         "hourly_rate": job.get("hourlyRate", 0),
     })
     state["total_earned"] = round(state.get("total_earned", 0.0) + earnings, 2)
+    state.setdefault("jobs_hours_worked", {})[key] = round(hours_worked + hours, 2)
 
     return {
         "success": True,
@@ -462,4 +497,7 @@ def build_summary(state):
         "total_km": round(tkm, 1),
         "subsidy_ratio": round(ratio, 1),
         "subsidy_valid": subsidy_valid,
+        # ── ITEM 2.5 — Extra data for the final report ──
+        "destination_log": state.get("destination_log", []),
+        "activities_done": state.get("activities_done", []),
     }

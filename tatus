@@ -1,0 +1,44 @@
+[33m9d41c88[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m)[m HEAD@{0}: commit: Detalles
+[33m7738a7f[m HEAD@{1}: commit: Detalles
+[33mb3aa5a3[m[33m ([m[1;32magents/validar-presupuesto-viajero-actividades[m[33m)[m HEAD@{2}: commit: Detalle en r5
+[33mbdc7d26[m[33m ([m[1;31morigin/jazmin-branch[m[33m, [m[1;32mjazmin-branch[m[33m)[m HEAD@{3}: merge jazmin-branch: Fast-forward
+[33mcdc61ba[m HEAD@{4}: checkout: moving from jazmin-branch to main
+[33mbdc7d26[m[33m ([m[1;31morigin/jazmin-branch[m[33m, [m[1;32mjazmin-branch[m[33m)[m HEAD@{5}: commit: Detalles
+[33mcdc61ba[m HEAD@{6}: checkout: moving from main to jazmin-branch
+[33mcdc61ba[m HEAD@{7}: merge jazmin-branch: Fast-forward
+[33md393cb2[m HEAD@{8}: checkout: moving from jazmin-branch to main
+[33mcdc61ba[m HEAD@{9}: commit: Recuperacion de codigo
+[33md393cb2[m HEAD@{10}: checkout: moving from main to jazmin-branch
+[33md393cb2[m HEAD@{11}: merge jazmin-branch: Fast-forward
+[33me759c05[m HEAD@{12}: checkout: moving from jazmin-branch to main
+[33md393cb2[m HEAD@{13}: commit (merge): Merge
+[33mb7f518d[m HEAD@{14}: merge origin/laura-dev: Fast-forward
+[33mb551aaf[m HEAD@{15}: checkout: moving from main to jazmin-branch
+[33me759c05[m HEAD@{16}: commit: Mini animacion de vuelo.
+[33mc54b622[m HEAD@{17}: commit: Bloqueo de aristas en el grafo
+[33m3103dc1[m HEAD@{18}: commit: Visualizacion de actividades opcionales a realizar
+[33m25815b1[m HEAD@{19}: commit: Actualizacion de valores de alimentacion y alojamiento.
+[33m44a4069[m HEAD@{20}: commit: Actualizacion de valores de alimentacion y alojamiento.
+[33m7931d22[m HEAD@{21}: commit: feat: mejorar la funcionalidad de selección de vuelos y agregar actividades obligatorias para el viajero
+[33mb551aaf[m HEAD@{22}: checkout: moving from jazmin-branch to main
+[33mb551aaf[m HEAD@{23}: checkout: moving from main to jazmin-branch
+[33mb551aaf[m HEAD@{24}: merge jazmin-branch: Fast-forward
+[33m33c0d50[m HEAD@{25}: pull origin main: Fast-forward
+[33md45a584[m HEAD@{26}: checkout: moving from jazmin-branch to main
+[33mb551aaf[m HEAD@{27}: commit: Interrupciones en la red
+[33m33c0d50[m HEAD@{28}: reset: moving to origin/main
+[33mdda99ec[m HEAD@{29}: reset: moving to HEAD
+[33mdda99ec[m HEAD@{30}: reset: moving to HEAD
+[33mdda99ec[m HEAD@{31}: commit: Interrupciones en la red
+[33m05ada5d[m HEAD@{32}: pull origin main: Fast-forward
+[33md45a584[m HEAD@{33}: checkout: moving from main to jazmin-branch
+[33md45a584[m HEAD@{34}: merge jazmin-branch: Fast-forward
+[33m2f82a51[m HEAD@{35}: checkout: moving from jazmin-branch to main
+[33md45a584[m HEAD@{36}: commit: Añadir actividades opcionales
+[33m2f82a51[m HEAD@{37}: checkout: moving from main to jazmin-branch
+[33m2f82a51[m HEAD@{38}: merge jazmin-branch: Fast-forward
+[33m52e06d3[m HEAD@{39}: checkout: moving from jazmin-branch to main
+[33m2f82a51[m HEAD@{40}: commit: Añadir sus funciones de alojamiento y alimentacion.
+[33m0bb4f5e[m HEAD@{41}: commit: Create traveler
+[33m52e06d3[m HEAD@{42}: checkout: moving from main to jazmin-branch
+[33m52e06d3[m HEAD@{43}: clone: from https://github.com/andresserna06/SkyRoute-Planner.git
