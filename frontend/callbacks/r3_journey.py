@@ -23,7 +23,6 @@ from frontend.config import COLORS, CARD, SECTION_TITLE, SHOW, HIDE
 
 def register(app):
 
-    # ── Main state machine callback ────────────────────────────────────────────
     @app.callback(
         Output("journey-store", "data"),
         Input("start-btn", "n_clicks"),
@@ -71,17 +70,28 @@ def register(app):
             if flight_val is None:
                 raise dash.exceptions.PreventUpdate
             journey_data["blocked_edges"] = blocked_edges_data or []
-            choose_flight(g, journey_data, int(flight_val))
-            journey_data["show_activities"] = True
+            # Store pending flight and activate transit mode
+            journey_data["pending_flight"] = int(flight_val)
+            journey_data["in_transit"] = True
+            journey_data["transit_ticks"] = 0
+            journey_data["show_activities"] = False
             return journey_data
 
         if tid == "confirm-activities-btn":
             selected = selected_activities or []
-            journey_data["blocked_edges"] = blocked_edges_data or []  # ← nueva
+            journey_data["blocked_edges"] = blocked_edges_data or []
+            journey_data.setdefault("activities_done", [])
             for idx_str in selected:
                 result = do_optional_activity(g, journey_data, int(idx_str))
                 if not result.get("success"):
                     print(f"[activity skipped] {result.get('error')}")
+                else:
+                    journey_data["activities_done"].append({
+                        "airport": journey_data["current_id"],
+                        "name": result["activity_name"],
+                        "cost": result["cost_usd"],
+                        "duration_min": result["duration_min"],
+                    })
             journey_data["free_time_h"] = compute_free_time(journey_data)
             journey_data["show_activities"] = False
             return journey_data
@@ -89,7 +99,7 @@ def register(app):
         if tid == "work-btn":
             if job_val is None or not hours_val:
                 raise dash.exceptions.PreventUpdate
-            journey_data["blocked_edges"] = blocked_edges_data or []  # ← nueva
+            journey_data["blocked_edges"] = blocked_edges_data or []
             work_at_job(g, journey_data, int(job_val), float(hours_val))
             return journey_data
 
@@ -99,7 +109,6 @@ def register(app):
 
         raise dash.exceptions.PreventUpdate
 
-    # ── Render callback ────────────────────────────────────────────────────────
     @app.callback(
         Output("journey-status",     "children"),
         Output("setup-section",      "style"),
@@ -116,6 +125,7 @@ def register(app):
         Output("job-result",         "children"),
         Output("activity-checklist", "options"),
         Output("activity-checklist", "value"),
+        Output("transit-section",    "style"),
         Input("journey-store",       "data"),
         State("graph-store",         "data"),
     )
@@ -127,18 +137,20 @@ def register(app):
             HIDE,
             [], None, None, "",
             [], [],
+            HIDE,
         )
         if not journey_data:
             return empty
 
-        finished = journey_data.get("finished", False)
+        finished  = journey_data.get("finished", False)
+        in_transit = journey_data.get("in_transit", False)
         g = build_graph_from_dict(graph_data) if graph_data else None
 
-        budget = journey_data["budget"]
-        initial_budget = journey_data.get("initial_budget", budget)
-        time_h = journey_data["time_min"] / 60.0
+        budget          = journey_data["budget"]
+        initial_budget  = journey_data.get("initial_budget", budget)
+        time_h          = journey_data["time_min"] / 60.0
         total_flight_cost = sum(s["cost"] for s in journey_data.get("segments", []))
-        total_earned = journey_data.get("total_earned", 0.0)
+        total_earned    = journey_data.get("total_earned", 0.0)
         obligatory_total = journey_data.get("obligatory_cost_total", 0.0)
         pct = (budget / initial_budget * 100) if initial_budget > 0 else 0
         budget_color = (
@@ -202,7 +214,7 @@ def register(app):
         if finished:
             s = build_summary(journey_data)
             s["initial_budget"] = initial_budget
-            report = _render_report(s)
+            _render_report(s)
             return (
                 status, HIDE, HIDE, SHOW,
                 [], None,
@@ -210,9 +222,22 @@ def register(app):
                 HIDE,
                 [], None, None, "",
                 [], [],
+                HIDE,
             )
 
-        # ── 2.3.a — Activity panel ─────────────────────────────────────────────
+        # Show transit panel while flight is in progress
+        if in_transit:
+            return (
+                status, HIDE, HIDE, HIDE,
+                [], None,
+                HIDE, None,
+                HIDE,
+                [], None, None, "",
+                [], [],
+                SHOW,
+            )
+
+        # Activity panel
         show_activities = journey_data.get("show_activities", False)
         activity_opts = []
         activity_section_style = HIDE
@@ -222,7 +247,7 @@ def register(app):
             acts_result = get_optional_activities(g, journey_data)
             if acts_result.get("success"):
                 remaining_window_h = acts_result.get("remaining_window_h", 0.0)
-                minimum_stay_h = acts_result.get("minimum_stay_h", 0.0)
+                minimum_stay_h     = acts_result.get("minimum_stay_h", 0.0)
                 airport_id = journey_data["current_id"]
                 vertex = g.get_vertex(airport_id)
                 airport_name = vertex.city if vertex else airport_id
@@ -246,23 +271,20 @@ def register(app):
                 for act in acts_result.get("activities", []):
                     fits_label = "" if act["fits_in_window"] else "  ⚠ not enough time"
                     label = (
-                        f"{act['name']}  ·  "
-                        f"{act['duration_min']} min  ·  "
-                        f"${act['cost_usd']:.2f}"
-                        f"{fits_label}"
+                        f"{act['name']}  ·  {act['duration_min']} min  ·  "
+                        f"${act['cost_usd']:.2f}{fits_label}"
                     )
                     activity_opts.append({
                         "label": label,
                         "value": str(act["id"]),
                         "disabled": not act["fits_in_window"],
                     })
-
                 activity_section_style = SHOW
 
-        # ── Jobs ───────────────────────────────────────────────────────────────
-        job_opts = []
+        # Jobs
+        job_opts    = []
         job_visible = HIDE
-        job_result = ""
+        job_result  = ""
 
         if g:
             jobs_res = get_available_jobs(g, journey_data)
@@ -272,9 +294,9 @@ def register(app):
                     job_opts.append({"label": label, "value": str(j["id"])})
                 if job_opts:
                     job_visible = SHOW
-                    job_result = "Low budget — work to earn more."
+                    job_result  = "Low budget — work to earn more."
 
-        # ── Flights (only shown after activities are confirmed) ────────────────
+        # Flights
         flight_opts = []
         if not show_activities and g:
             journey_data["blocked_edges"] = journey_data.get("blocked_edges", [])
@@ -287,13 +309,33 @@ def register(app):
                     )
                     flight_opts.append({"label": label, "value": str(fl["id"])})
 
-        # ── Free time notice ───────────────────────────────────────────────────
-        free_time_h = journey_data.get("free_time_h")
-        if free_time_h is not None and free_time_h > 0 and not show_activities:
-            status_lines.append(html.Div(
-                f"Free time at {journey_data['current_id']}: {free_time_h:.2f} h",
-                style={"fontSize": "11px", "color": COLORS["text_dim"], "marginTop": "4px"},
-            ))
+        # Activities summary + free time
+        if not show_activities:
+            activities_done = journey_data.get("activities_done", [])
+            current_airport = journey_data["current_id"]
+            last_activities = [a for a in activities_done if a.get("airport") == current_airport]
+
+            if last_activities:
+                names = "  ·  ".join(a["name"] for a in last_activities)
+                total_act_cost = sum(a["cost"] for a in last_activities)
+                status_lines.append(html.Div(
+                    f"✅ Activities: {names}  ·  -${total_act_cost:.2f}",
+                    style={"fontSize": "11px", "color": COLORS["highlight"],
+                           "marginTop": "4px", "fontWeight": "600"},
+                ))
+
+            free_time_h = journey_data.get("free_time_h")
+            if free_time_h is not None and free_time_h > 0:
+                status_lines.append(html.Div(
+                    f"🕐 Free time at {current_airport}: {free_time_h:.2f} h",
+                    style={"fontSize": "11px", "color": COLORS["text_dim"], "marginTop": "4px"},
+                ))
+            elif free_time_h == 0 and last_activities:
+                status_lines.append(html.Div(
+                    "⏱ Just in time for your next flight.",
+                    style={"fontSize": "11px", "color": COLORS["ok"], "marginTop": "4px"},
+                ))
+
             status = html.Div(
                 style={**CARD, "borderLeft": f"3px solid {budget_color}", "marginBottom": "14px"},
                 children=status_lines,
@@ -301,19 +343,16 @@ def register(app):
 
         return (
             status,
-            HIDE,
-            SHOW,
-            HIDE,
+            HIDE, SHOW, HIDE,
             flight_opts, None,
             activity_section_style,
             arrival_info_content,
             job_visible,
             job_opts, None, None, job_result,
             activity_opts, [],
+            HIDE,
         )
 
-
-# ── Report renderer ────────────────────────────────────────────────────────────
 
 def _render_report(s):
     sections = []
