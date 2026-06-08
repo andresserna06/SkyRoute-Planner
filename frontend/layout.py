@@ -107,6 +107,16 @@ def build_layout():
                         "fontFamily": "Inter, Segoe UI, sans-serif", "cursor": "pointer",
                     }),
                     html.Div(id="airport-info", children=_placeholder()),
+                    
+                    dcc.Store(id="blocked-edges-store", data=[]),
+                    
+                    html.Div(id="edge-info", style=HIDE, children=[
+                    html.Hr(style={"margin": "0 0 12px 0", "border": "none",
+                                "borderTop": f"1px solid {COLORS['border']}"}),
+                    html.Div(id="edge-info-content"),
+                    html.Button("🚫  Bloquear ruta", id="block-edge-btn", n_clicks=0,
+                                style={**BTN_DANGER, "width": "100%", "marginTop": "8px"}),
+                ]),
                 ]),
 
                 cyto.Cytoscape(

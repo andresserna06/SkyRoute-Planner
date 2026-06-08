@@ -40,12 +40,13 @@ def register(app):
         State("activity-checklist", "value"),
         State("journey-store", "data"),
         State("graph-store", "data"),
+        State("blocked-edges-store", "data"),
     )
     def handle_journey_action(
         start_n, fly_n, end_n, new_n, work_n, confirm_activities_n,
         origin, budget, flight_val,
         job_val, hours_val, selected_activities,
-        journey_data, graph_data,
+        journey_data, graph_data, blocked_edges_data,
     ):
         tid = dash.callback_context.triggered_id
         if not tid:
@@ -57,7 +58,9 @@ def register(app):
         if tid == "start-btn":
             if not origin or not budget or not graph_data:
                 raise dash.exceptions.PreventUpdate
-            return create_dynamic_state(origin, float(budget))
+            state = create_dynamic_state(origin, float(budget))
+            state["blocked_edges"] = blocked_edges_data or []
+            return state
 
         if not journey_data or not graph_data:
             raise dash.exceptions.PreventUpdate
@@ -67,12 +70,14 @@ def register(app):
         if tid == "fly-btn":
             if flight_val is None:
                 raise dash.exceptions.PreventUpdate
+            journey_data["blocked_edges"] = blocked_edges_data or []
             choose_flight(g, journey_data, int(flight_val))
             journey_data["show_activities"] = True
             return journey_data
 
         if tid == "confirm-activities-btn":
             selected = selected_activities or []
+            journey_data["blocked_edges"] = blocked_edges_data or []  # ← nueva
             for idx_str in selected:
                 result = do_optional_activity(g, journey_data, int(idx_str))
                 if not result.get("success"):
@@ -84,6 +89,7 @@ def register(app):
         if tid == "work-btn":
             if job_val is None or not hours_val:
                 raise dash.exceptions.PreventUpdate
+            journey_data["blocked_edges"] = blocked_edges_data or []  # ← nueva
             work_at_job(g, journey_data, int(job_val), float(hours_val))
             return journey_data
 
@@ -180,6 +186,14 @@ def register(app):
                 style={"fontSize": "11px", "color": COLORS["error"], "marginTop": "4px", "fontWeight": "600"},
             ))
 
+        reroute = journey_data.get("reroute_notice")
+        if reroute:
+            status_lines.append(html.Div(
+                f"{reroute}",
+                style={"fontSize": "11px", "color": COLORS["warning"],
+                       "marginTop": "4px", "fontWeight": "600"},
+            ))
+
         status = html.Div(
             style={**CARD, "borderLeft": f"3px solid {budget_color}", "marginBottom": "14px"},
             children=status_lines,
@@ -263,6 +277,7 @@ def register(app):
         # ── Flights (only shown after activities are confirmed) ────────────────
         flight_opts = []
         if not show_activities and g:
+            journey_data["blocked_edges"] = journey_data.get("blocked_edges", [])
             result = get_available_flights(g, journey_data)
             if result.get("success"):
                 for fl in result.get("available_flights", []):
@@ -286,12 +301,12 @@ def register(app):
 
         return (
             status,
-            HIDE,                    # setup-section
-            SHOW,                    # flying-section
-            HIDE,                    # complete-section
+            HIDE,
+            SHOW,
+            HIDE,
             flight_opts, None,
-            activity_section_style,  # arrival-section
-            arrival_info_content,    # arrival-info
+            activity_section_style,
+            arrival_info_content,
             job_visible,
             job_opts, None, None, job_result,
             activity_opts, [],

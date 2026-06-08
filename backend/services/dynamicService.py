@@ -12,8 +12,8 @@ from backend.services.itineraryService import (
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget):
-    """Return all affordable, unvisited flights from vertex respecting the 20% subsidised rule."""
+def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget, blocked_edges=None):
+    blocked_edges = blocked_edges or []
     options = []
 
     for edge in vertex.adjacencies:
@@ -22,7 +22,9 @@ def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km,
         if dest_id in visited:
             continue
 
-        if _exceeds_subsidized_limit(edge, free_km, total_km):
+        # Filter blocked edges
+        edge_key = f"{vertex.id}->{dest_id}"
+        if edge_key in blocked_edges:
             continue
 
         for aircraft in edge.aircraft:
@@ -91,6 +93,7 @@ def get_available_flights(graph, state):
         state["free_km"],
         state["total_km"],
         state["budget"],
+        state.get("blocked_edges", []), 
     )
 
     flights = [
@@ -104,6 +107,7 @@ def get_available_flights(graph, state):
         }
         for idx, o in enumerate(options)
     ]
+    
 
     return {
         "success": True,
@@ -135,6 +139,7 @@ def choose_flight(graph, state, flight_id):
         state["free_km"],
         state["total_km"],
         state["budget"],
+        state.get("blocked_edges", []),  # ← agrega esta línea
     )
 
     if flight_id < 0 or flight_id >= len(options):
