@@ -118,8 +118,10 @@ def register(app):
         prevent_initial_call=True,
     )
     def update_blocked_visuals(blocked_list, graph_data):
-        if not graph_data or not blocked_list:
+        if not graph_data:
             raise dash.exceptions.PreventUpdate
+        # Allow empty list to reset all blocked visuals
+        blocked_list = blocked_list or []
         g = build_graph_from_dict(graph_data)
         from frontend.graph_helpers import build_elements
         elements = build_elements(g)

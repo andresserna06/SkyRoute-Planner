@@ -52,6 +52,48 @@ def build_layout():
                 html.Div(style={"height": "3px", "background": f"linear-gradient(90deg, {COLORS['hub']}, {COLORS['highlight']}, {COLORS['secondary']})"}),
             ]),
 
+            # ── Trip report modal — shown automatically when journey finishes ──
+            html.Div(id="journey-modal", style={
+                "display": "none",
+                "position": "fixed", "top": "0", "left": "0", "right": "0", "bottom": "0",
+                "backgroundColor": "rgba(0,0,0,0.5)",
+                "zIndex": "1000",
+                "justifyContent": "center",
+                "alignItems": "center",
+                "padding": "20px",
+            }, children=[
+                html.Div(style={
+                    "backgroundColor": "#ffffff",
+                    "borderRadius": "12px",
+                    "width": "640px",
+                    "maxWidth": "calc(100vw - 40px)",
+                    "maxHeight": "85vh",
+                    "display": "flex",
+                    "flexDirection": "column",
+                    "boxShadow": "0 20px 60px rgba(0,0,0,0.35)",
+                    "overflow": "hidden",
+                }, children=[
+                    html.Div(style={
+                        "display": "flex", "justifyContent": "space-between", "alignItems": "center",
+                        "padding": "16px 20px", "flexShrink": 0,
+                        "borderBottom": f"1px solid {COLORS['border']}",
+                    }, children=[
+                        html.Div("Resumen del viaje", style={
+                            "fontSize": "16px", "fontWeight": "800", "color": COLORS["text"],
+                        }),
+                        html.Button("✕", id="close-modal-btn", n_clicks=0, style={
+                            "background": "none", "border": "none", "fontSize": "18px",
+                            "cursor": "pointer", "color": COLORS["text_dim"], "padding": "4px 10px",
+                            "borderRadius": "4px", "fontFamily": "Inter, Segoe UI, sans-serif",
+                            "lineHeight": "1",
+                        }),
+                    ]),
+                    html.Div(id="journey-report", style={
+                        "padding": "16px 20px", "overflowY": "auto", "flex": "1",
+                    }),
+                ]),
+            ]),
+
             html.Div(style={"display": "flex", "flex": 1, "overflow": "hidden"}, children=[
 
                 html.Div(style={
@@ -268,6 +310,13 @@ def build_layout():
 
                                         html.Div(id="journey-status"),
 
+                                        # New journey button — shown below status card when trip is finished
+                                        html.Div(id="new-journey-container", style=HIDE, children=[
+                                            html.Button("↺  Nuevo viaje", id="new-journey-btn", n_clicks=0,
+                                                        style={**BTN_NEUTRAL, "width": "100%",
+                                                               "marginBottom": "14px"}),
+                                        ]),
+
                                         html.Div(id="setup-section", children=[
                                             html.Span("Aeropuerto de origen", style=LABEL),
                                             dcc.Dropdown(id="planner-origin", placeholder="Selecciona origen...",
@@ -312,7 +361,7 @@ def build_layout():
                                                     dcc.Input(id="hours-input", type="number", placeholder="Horas a trabajar",
                                                               min=0.5, step=0.5, style={**INPUT_STYLE, "marginBottom": "8px"}),
                                                     html.Button("Trabajar", id="work-btn", n_clicks=0,
-                                                                style={**BTN_NEUTRAL, "width": "100%"}),
+                                                                style={**BTN_PRIMARY, "width": "100%"}),
                                                     html.Div(id="job-result", style={"fontSize": "11px", "marginTop": "6px", "color": COLORS["text_dim"]}),
                                                 ]),
                                             ]),
@@ -370,11 +419,6 @@ def build_layout():
                                                         style={**BTN_PRIMARY, "width": "100%", "marginTop": "10px"}),
                                         ]),
 
-                                        html.Div(id="complete-section", style=HIDE, children=[
-                                            html.Div(id="journey-report"),
-                                            html.Button("↺  Nuevo viaje", id="new-journey-btn", n_clicks=0,
-                                                        style={**BTN_NEUTRAL, "width": "100%", "marginTop": "12px"}),
-                                        ]),
                                     ]),
                                 ]),
                         ]),
