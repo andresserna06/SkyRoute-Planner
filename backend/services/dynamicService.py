@@ -2,8 +2,7 @@
 # 2.3.a: Obligatory (food + accommodation) and optional activities
 # 2.3.b: Jobs at airports (available when budget < 35% of initial)
 # 2.3.c: Transport costs with aircraft selection and subsidised-route rule
-import inspect, sys
-print(__file__)  # te dice qué archivo se está cargando
+
 from backend.services.itineraryService import (
     _edge_cost,
     _edge_time,
@@ -12,13 +11,19 @@ from backend.services.itineraryService import (
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
-def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget):
+def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km, budget, blocked_edges=None):
+    blocked_edges = blocked_edges or []
     options = []
 
     for edge in vertex.adjacencies:
         dest_id = edge.destination_vertex.id
 
         if dest_id in visited:
+            continue
+        
+        # Filter blocked edges
+        edge_key = f"{vertex.id}->{dest_id}"
+        if edge_key in blocked_edges:
             continue
 
         is_subsidized = edge.base_cost == 0
@@ -93,6 +98,7 @@ def get_available_flights(graph, state):
         state["free_km"],
         state["total_km"],
         state["budget"],
+        state.get("blocked_edges", []),
     )
 
     flights = [
@@ -131,6 +137,7 @@ def choose_flight(graph, state, flight_id):
         state["free_km"],
         state["total_km"],
         state["budget"],
+        state.get("blocked_edges", []),
     )
 
     if flight_id < 0 or flight_id >= len(options):
@@ -205,6 +212,7 @@ def choose_flight(graph, state, flight_id):
         state["free_km"],
         state["total_km"],
         state["budget"],
+        state.get("blocked_edges", []),
     )
     if not remaining:
         state["finished"] = True
