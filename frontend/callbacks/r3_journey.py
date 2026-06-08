@@ -114,7 +114,7 @@ def register(app):
                     traveler.last_food           = journey_data["last_food_h"]
                     traveler.last_accommodation  = journey_data["last_accommodation_h"]
                     traveler.current_location    = vertex
-                    traveler.check_obligatory(vertex)
+                    oblig_result = traveler.check_obligatory(vertex)
                     obligatory_delta = round(traveler.total_cost, 2)
                     journey_data["budget"] = round(traveler.budget, 2)
                     journey_data["obligatory_cost_total"] = round(
@@ -122,6 +122,9 @@ def register(app):
                     )
                     journey_data["last_food_h"]          = traveler.last_food
                     journey_data["last_accommodation_h"] = traveler.last_accommodation
+                    if not oblig_result.get("success"):
+                        journey_data.setdefault("payment_warnings", [])
+                        journey_data["payment_warnings"].append(oblig_result["error"])
 
                 journey_data["show_activities"] = False
 
@@ -265,6 +268,21 @@ def register(app):
                        "backgroundColor": "#fef3c7", "padding": "6px 8px",
                        "borderRadius": "4px", "lineHeight": "1.5"},
             ))
+
+        # Advertencias de pago insuficiente (comida / alojamiento)
+        payment_warnings = journey_data.get("payment_warnings", [])
+        if payment_warnings:
+            for warn_msg in payment_warnings:
+                status_lines.append(html.Div(
+                    f"🚫 {warn_msg}",
+                    style={"fontSize": "11px", "color": "#dc2626",
+                           "marginTop": "6px", "fontWeight": "700",
+                           "backgroundColor": "#fef2f2", "padding": "6px 8px",
+                           "borderRadius": "4px", "lineHeight": "1.5",
+                           "border": "1px solid #fca5a5"},
+                ))
+            # Clear after display so they don't accumulate indefinitely
+            journey_data["payment_warnings"] = []
 
         status = html.Div(
             style={**CARD, "borderLeft": f"3px solid {budget_color}", "marginBottom": "14px"},
