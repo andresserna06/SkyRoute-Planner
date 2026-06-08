@@ -29,7 +29,7 @@ def register(app):
         prevent_initial_call=True,
     )
     def manage_transit(n_intervals, journey_data, progress_data, graph_data, blocked_edges):
-        tid = dash.callback_context.triggered_id
+        triggered_id = dash.callback_context.triggered_id
 
         bar_style = {
             "height": "100%", "width": "0%",
@@ -39,7 +39,7 @@ def register(app):
         }
 
         # journey-store changed — start or stop interval
-        if tid == "journey-store":
+        if triggered_id == "journey-store":
             if not journey_data or not journey_data.get("in_transit", False):
                 return True, None, dash.no_update, "", bar_style, ""
             return False, {"tick": 0, "total": TRANSIT_STEPS}, dash.no_update, "", bar_style, "Preparing flight..."
@@ -50,11 +50,11 @@ def register(app):
         if not progress_data or not graph_data:
             return True, None, dash.no_update, "", bar_style, ""
 
-        tick  = progress_data.get("tick", 0) + 1
-        total = progress_data.get("total", TRANSIT_STEPS)
-        pct   = min(int(tick / total * 100), 100)
+        tick         = progress_data.get("tick", 0) + 1
+        total        = progress_data.get("total", TRANSIT_STEPS)
+        progress_pct = min(int(tick / total * 100), 100)
 
-        g           = build_graph_from_dict(graph_data)
+        graph       = build_graph_from_dict(graph_data)
         origin      = journey_data["current_id"]
         flight_id   = journey_data.get("pending_flight", 0)
         blocked     = blocked_edges or []
@@ -67,7 +67,7 @@ def register(app):
         aircraft    = journey_data.get("pending_aircraft",    "?")
         title       = f"{origin} -> {destination}  ·  {aircraft}"
 
-        bar_style["width"] = f"{pct}%"
+        bar_style["width"] = f"{progress_pct}%"
 
         # Check if edge was blocked mid-flight — return traveler to origin
         edge_key = f"{origin}->{destination}"
@@ -86,7 +86,7 @@ def register(app):
 
         # Transit complete
         if tick >= total:
-            choose_flight(g, journey_data, flight_id)
+            choose_flight(graph, journey_data, flight_id)
             journey_data["in_transit"]        = False
             journey_data["pending_flight"]    = None
             journey_data["pending_destination"] = None
@@ -95,4 +95,4 @@ def register(app):
             return True, None, journey_data, title, bar_style, "¡Llegaste!"
 
         progress_data["tick"] = tick
-        return False, progress_data, dash.no_update, title, bar_style, f"In transit... {pct}%"
+        return False, progress_data, dash.no_update, title, bar_style, f"In transit... {progress_pct}%"

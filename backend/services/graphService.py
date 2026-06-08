@@ -1,6 +1,5 @@
 # ── ITEM 2.1 — JSON parser → Graph builder: nodes, edges, aircraft config ──
 
-import json
 from backend.models.vertex import Vertex
 from backend.models.edge import Edge
 from backend.models.graph import Graph
@@ -16,7 +15,7 @@ DEFAULT_AIRCRAFT_CONFIG = {
 
 def build_graph_from_dict(data):
     # Builds a Graph object from an already-parsed JSON dict.
-    # Called by load_from_json and by the web dashboard when a file is uploaded.
+    # Called by the web dashboard when a JSON file is uploaded.
     graph = Graph()
 
     # First pass: create one Vertex per airport
@@ -82,12 +81,5 @@ def build_graph_from_dict(data):
     )
 
     return graph
-
-
-def load_from_json(file_path):
-    # Reads a JSON file from disk and returns a Graph — used by the CLI (app.py).
-    with open(file_path, encoding="utf-8") as f:
-        data = json.load(f)
-    return build_graph_from_dict(data)
 
 # ── END ITEM 2.1 ──

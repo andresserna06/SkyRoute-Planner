@@ -25,22 +25,22 @@ def register(app):
         State("graph-store", "data"),
         prevent_initial_call=True,
     )
-    def apply_aircraft_config(n, cost_vals, time_vals, graph_data):
-        if not n or not graph_data:
+    def apply_aircraft_config(n_clicks, cost_vals, time_vals, graph_data):
+        if not n_clicks or not graph_data:
             raise dash.exceptions.PreventUpdate
 
         keys = ["comercial", "regional", "helice"]
         new_data = dict(graph_data)
-        ac = {}
+        aircraft_cfg = {}
         for i, key in enumerate(keys):
             name = AIRCRAFT_MAP[key]
-            cv = cost_vals[i] if i < len(cost_vals) else None
-            tv = time_vals[i] if i < len(time_vals) else None
-            ac[name] = {
-                "costPerKm": float(cv) if cv is not None else 0,
-                "timePerKm": float(tv) if tv is not None else 0,
+            cost_value = cost_vals[i] if i < len(cost_vals) else None
+            time_value = time_vals[i] if i < len(time_vals) else None
+            aircraft_cfg[name] = {
+                "costPerKm": float(cost_value) if cost_value is not None else 0,
+                "timePerKm": float(time_value) if time_value is not None else 0,
             }
-        new_data["aircraft_config"] = ac
+        new_data["aircraft_config"] = aircraft_cfg
         return new_data, html.Span("Aplicado", style={"color": "#16a34a", "fontSize": "10px", "fontWeight": "600"})
 
     @app.callback(
@@ -51,8 +51,8 @@ def register(app):
         State("graph-store", "data"),
         prevent_initial_call=True,
     )
-    def restore_aircraft_config(n, orig_data, graph_data):
-        if not n:
+    def restore_aircraft_config(n_clicks, orig_data, graph_data):
+        if not n_clicks:
             raise dash.exceptions.PreventUpdate
 
         if orig_data:

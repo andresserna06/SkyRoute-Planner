@@ -216,46 +216,24 @@ def _dfs_max_coverage(
 
 
 # ──────────────────────────────────────────────────────────────────────
-# ITEM 2.2.a — Proposal A: route visiting max destinations without exceeding budget
-#   Input: origin, budget_usd, time_hours, preferred_aircraft
-#   Output: flight sequence, costs per segment, cumulative total
+# ITEM 2.2.a / 2.2.b (shared) — Max-coverage engine
+#   Proposals A and B run the SAME DFS; they only differ in which limit is
+#   the primary criterion (budget vs time) and the "no route" message.
+#   The two public functions below are thin wrappers over this helper.
 # ──────────────────────────────────────────────────────────────────────
 
-def propose_max_coverage_by_budget(
-    graph,
-    origin_id,
-    budget_usd,
-    time_hours=float("inf"),
-    preferred_aircraft=None
-):
+def _propose_max_coverage(graph, origin_id, budget_usd, time_hours,
+                          criterion, empty_note, preferred_aircraft=None):
 
     if graph.get_vertex(origin_id) is None:
-        return {
-            "success": False,
-            "error": f"Unknown origin airport: {origin_id}"
-        }
+        return {"success": False, "error": f"Unknown origin airport: {origin_id}"}
 
-    if preferred_aircraft is None:
-        preferred_aircraft = set()
-
-    preferred_set = (
-        set(preferred_aircraft)
-        if preferred_aircraft else set()
-    )
-
+    preferred_set = set(preferred_aircraft) if preferred_aircraft else set()
     time_limit_min = time_hours * 60.0
+    all_aircraft_types = set(graph.aircraft_config.keys())
 
-    all_aircraft_types = set(
-        graph.aircraft_config.keys()
-    )
-
-    (
-        _,
-        segments,
-        total_cost,
-        total_time_min,
-        aircraft_used,
-    ) = _dfs_max_coverage(
+    # Run the DFS that maximises visited destinations under both limits
+    (_, segments, total_cost, total_time_min, aircraft_used) = _dfs_max_coverage(
         graph,
         origin_id,
         {origin_id},
@@ -265,12 +243,13 @@ def propose_max_coverage_by_budget(
         time_limit_min,
         set(),
         [],
-        "budget",
+        criterion,
         graph.aircraft_config,
         preferred_set,
-        all_aircraft_types
+        all_aircraft_types,
     )
 
+    # No reachable destination within the given limits
     if not segments:
         return {
             "success": True,
@@ -282,137 +261,59 @@ def propose_max_coverage_by_budget(
             "total_time_hours": 0.0,
             "aircraft_used": [],
             "path": [origin_id],
-            "note": "No valid route found within budget."
+            "note": empty_note,
         }
 
-    path = [origin_id]
-
-    for segment in segments:
-        path.append(segment["destination"])
+    # Build the visited path: origin + every segment destination in order
+    path = [origin_id] + [segment["destination"] for segment in segments]
 
     return {
         "success": True,
         "origin": origin_id,
-
         "destinations_visited": len(segments),
-
         "segments": segments,
-
         "total_cost": round(total_cost, 2),
-
         "total_time_min": round(total_time_min, 2),
-
-        "total_time_hours": round(
-            total_time_min / 60.0,
-            2
-        ),
-
+        "total_time_hours": round(total_time_min / 60.0, 2),
         "aircraft_used": sorted(aircraft_used),
-
         "path": path,
     }
 
+
+# ──────────────────────────────────────────────────────────────────────
+# ITEM 2.2.a — Proposal A: max destinations without exceeding budget
+#   Input: origin, budget_usd, time_hours, preferred_aircraft
+#   Output: flight sequence, costs per segment, cumulative total
+# ──────────────────────────────────────────────────────────────────────
+
+def propose_max_coverage_by_budget(graph, origin_id, budget_usd,
+                                   time_hours=float("inf"), preferred_aircraft=None):
+    # Budget is the primary limit; time is an optional cap
+    return _propose_max_coverage(
+        graph, origin_id, budget_usd, time_hours,
+        criterion="budget",
+        empty_note="No valid route found within budget.",
+        preferred_aircraft=preferred_aircraft,
+    )
 
 # ── END ITEM 2.2.a ──
 
 
 # ──────────────────────────────────────────────────────────────────────
-# ITEM 2.2.b — Proposal B: route visiting max destinations within available time
+# ITEM 2.2.b — Proposal B: max destinations within available time
 #   Input: origin, time_hours, budget_usd, preferred_aircraft
 #   Output: flight sequence, duration per segment, cumulative time
 # ──────────────────────────────────────────────────────────────────────
 
-def propose_max_coverage_by_time(
-    graph,
-    origin_id,
-    time_hours,
-    budget_usd=float("inf"),
-    preferred_aircraft=None
-):
-
-    if graph.get_vertex(origin_id) is None:
-        return {
-            "success": False,
-            "error": f"Unknown origin airport: {origin_id}"
-        }
-
-    if preferred_aircraft is None:
-        preferred_aircraft = set()
-
-    preferred_set = (
-        set(preferred_aircraft)
-        if preferred_aircraft else set()
+def propose_max_coverage_by_time(graph, origin_id, time_hours,
+                                 budget_usd=float("inf"), preferred_aircraft=None):
+    # Time is the primary limit; budget is an optional cap
+    return _propose_max_coverage(
+        graph, origin_id, budget_usd, time_hours,
+        criterion="time",
+        empty_note="No valid route found within available time.",
+        preferred_aircraft=preferred_aircraft,
     )
-
-    time_limit_min = time_hours * 60.0
-
-    all_aircraft_types = set(
-        graph.aircraft_config.keys()
-    )
-
-    (
-        _,
-        segments,
-        total_cost,
-        total_time_min,
-        aircraft_used,
-    ) = _dfs_max_coverage(
-        graph,
-        origin_id,
-        {origin_id},
-        0.0,
-        0.0,
-        budget_usd,
-        time_limit_min,
-        set(),
-        [],
-        "time",
-        graph.aircraft_config,
-        preferred_set,
-        all_aircraft_types
-    )
-
-    if not segments:
-        return {
-            "success": True,
-            "origin": origin_id,
-            "destinations_visited": 0,
-            "segments": [],
-            "total_cost": 0.0,
-            "total_time_min": 0.0,
-            "total_time_hours": 0.0,
-            "aircraft_used": [],
-            "path": [origin_id],
-            "note": "No valid route found within available time."
-        }
-
-    path = [origin_id]
-
-    for segment in segments:
-        path.append(segment["destination"])
-
-    return {
-        "success": True,
-        "origin": origin_id,
-
-        "destinations_visited": len(segments),
-
-        "segments": segments,
-
-        "total_cost": round(total_cost, 2),
-
-        "total_time_min": round(total_time_min, 2),
-
-        "total_time_hours": round(
-            total_time_min / 60.0,
-            2
-        ),
-
-        "aircraft_used": list(aircraft_used),
-
-        "path": path,
-    }
-
 
 # ── END ITEM 2.2.b ──
 
@@ -486,17 +387,17 @@ def find_best_routes(
 
     if graph.get_vertex(origin_id) is None:
         return [{
-            "criterion": c,
+            "criterion": criterion_name,
             "success": False,
             "error": f"Unknown origin: {origin_id}"
-        } for c in criteria]
+        } for criterion_name in criteria]
 
     if graph.get_vertex(destination_id) is None:
         return [{
-            "criterion": c,
+            "criterion": criterion_name,
             "success": False,
             "error": f"Unknown destination: {destination_id}"
-        } for c in criteria]
+        } for criterion_name in criteria]
 
     if preferred_aircraft is None:
         preferred_aircraft = set()

@@ -57,6 +57,33 @@ def _list_available_flights(vertex, visited, aircraft_config, free_km, total_km,
     return options
 
 
+# ── Obligatory-charge helpers (shared by flights and activities) ────────────────
+
+def _traveler_from_state(state, vertex, current_time_h=None):
+    # Build a Traveler snapshot from the current journey state.
+    # current_time_h overrides the clock (used after an activity advances time).
+    from backend.models.traveler import Traveler
+    traveler = Traveler(budget=state["budget"])
+    traveler.current_time = state["time_min"] / 60.0 if current_time_h is None else current_time_h
+    traveler.last_food = state["last_food_h"]
+    traveler.last_accommodation = state["last_accommodation_h"]
+    traveler.current_location = vertex
+    return traveler
+
+
+def _sync_obligatory(state, traveler):
+    # Push the traveler's obligatory charges (food + accommodation) back into the
+    # journey state and return how much was charged this step.
+    obligatory_delta = round(traveler.total_cost, 2)
+    state["budget"] = round(traveler.budget, 2)
+    state["obligatory_cost_total"] = round(
+        state.get("obligatory_cost_total", 0.0) + obligatory_delta, 2
+    )
+    state["last_food_h"] = traveler.last_food
+    state["last_accommodation_h"] = traveler.last_accommodation
+    return obligatory_delta
+
+
 # ── State management ───────────────────────────────────────────────────────────
 
 def create_dynamic_state(origin_id, initial_budget):
@@ -156,13 +183,7 @@ def choose_flight(graph, state, flight_id):
     time_min = selected["time_min"]
     destination = selected["destination"]
 
-    from backend.models.traveler import Traveler
-
-    traveler = Traveler(budget=state["budget"])
-    traveler.current_time = state["time_min"] / 60.0
-    traveler.last_food = state["last_food_h"]
-    traveler.last_accommodation = state["last_accommodation_h"]
-    traveler.current_location = vertex
+    traveler = _traveler_from_state(state, vertex)
 
     if state["budget"] < cost:
         return {
@@ -192,13 +213,7 @@ def choose_flight(graph, state, flight_id):
     time_per_km = graph.aircraft_config[aircraft]["timePerKm"]
     traveler.check_flight(edge, time_per_km)
 
-    obligatory_delta = round(traveler.total_cost, 2)
-    state["budget"] = round(traveler.budget, 2)
-    state["obligatory_cost_total"] = round(
-        state.get("obligatory_cost_total", 0.0) + obligatory_delta, 2
-    )
-    state["last_food_h"] = traveler.last_food
-    state["last_accommodation_h"] = traveler.last_accommodation
+    _sync_obligatory(state, traveler)
     state["time_min"] = round(traveler.current_time * 60.0, 2)
     state["arrival_time_h"] = round(traveler.arrival_time, 4)
     state["minimum_stay_h"] = round(edge.minimum_stay / 60.0, 4)
@@ -335,23 +350,11 @@ def do_optional_activity(graph, state, activity_index):
     new_time_h = current_time_h + duration_h
     state["time_min"] = round(new_time_h * 60.0, 2)
 
-    from backend.models.traveler import Traveler
-
-    traveler = Traveler(budget=state["budget"])
-    traveler.current_time = new_time_h
-    traveler.last_food = state["last_food_h"]
-    traveler.last_accommodation = state["last_accommodation_h"]
-    traveler.current_location = vertex
+    traveler = _traveler_from_state(state, vertex, current_time_h=new_time_h)
 
     oblig_result = traveler.check_obligatory(vertex)
 
-    obligatory_delta = round(traveler.total_cost, 2)
-    state["budget"] = round(traveler.budget, 2)
-    state["obligatory_cost_total"] = round(
-        state.get("obligatory_cost_total", 0.0) + obligatory_delta, 2
-    )
-    state["last_food_h"] = traveler.last_food
-    state["last_accommodation_h"] = traveler.last_accommodation
+    obligatory_delta = _sync_obligatory(state, traveler)
 
     # Propagate insufficient-funds warnings for obligatory charges
     if not oblig_result.get("success"):
@@ -394,20 +397,20 @@ def get_available_jobs(graph, state):
     if vertex is None:
         return {"success": False, "show_jobs": False, "jobs": [], "error": f"Unknown airport: {state['current_id']}"}
 
-    raw = getattr(vertex, "jobs", []) or []
-    if not raw:
+    raw_jobs = getattr(vertex, "jobs", []) or []
+    if not raw_jobs:
         return {"success": True, "show_jobs": True, "jobs": [], "reason": "No jobs available at this airport."}
 
     jobs_out = []
-    for idx, j in enumerate(raw):
-        max_hours = j.get("maxHours", 8)
-        key = f"{state['current_id']}_{idx}"
-        hours_worked = state.get("jobs_hours_worked", {}).get(key, 0.0)
+    for idx, job in enumerate(raw_jobs):
+        max_hours = job.get("maxHours", 8)
+        job_key = f"{state['current_id']}_{idx}"
+        hours_worked = state.get("jobs_hours_worked", {}).get(job_key, 0.0)
         hours_remaining = round(max(0.0, max_hours - hours_worked), 2)
         jobs_out.append({
             "id": idx,
-            "name": j.get("name", "Job"),
-            "hourly_rate": j.get("hourlyRate", 0),
+            "name": job.get("name", "Job"),
+            "hourly_rate": job.get("hourlyRate", 0),
             "max_hours": max_hours,
             "hours_remaining": hours_remaining,
         })
@@ -424,15 +427,15 @@ def work_at_job(graph, state, job_index, hours):
     if vertex is None:
         return {"success": False, "error": f"Unknown airport: {state['current_id']}"}
 
-    raw = getattr(vertex, "jobs", []) or []
-    if job_index < 0 or job_index >= len(raw):
+    raw_jobs = getattr(vertex, "jobs", []) or []
+    if job_index < 0 or job_index >= len(raw_jobs):
         return {"success": False, "error": "Invalid job selection."}
 
-    job = raw[job_index]
+    job = raw_jobs[job_index]
     max_hours = job.get("maxHours", 8)
 
-    key = f"{state['current_id']}_{job_index}"
-    hours_worked = state.get("jobs_hours_worked", {}).get(key, 0.0)
+    job_key = f"{state['current_id']}_{job_index}"
+    hours_worked = state.get("jobs_hours_worked", {}).get(job_key, 0.0)
     remaining = round(max_hours - hours_worked, 2)
 
     if hours <= 0 or hours > remaining:
@@ -452,7 +455,7 @@ def work_at_job(graph, state, job_index, hours):
         "hourly_rate": job.get("hourlyRate", 0),
     })
     state["total_earned"] = round(state.get("total_earned", 0.0) + earnings, 2)
-    state.setdefault("jobs_hours_worked", {})[key] = round(hours_worked + hours, 2)
+    state.setdefault("jobs_hours_worked", {})[job_key] = round(hours_worked + hours, 2)
 
     return {
         "success": True,
@@ -473,9 +476,9 @@ def finish_itinerary(state):
 def build_summary(state):
     path = [state["origin_id"]] + [s["destination"] for s in state["segments"]]
 
-    skm = state.get("free_km", 0)
-    tkm = state.get("total_km", 0)
-    ratio = (skm / tkm * 100) if tkm > 0 else 0
+    subsidized_km = state.get("free_km", 0)
+    total_km = state.get("total_km", 0)
+    ratio = (subsidized_km / total_km * 100) if total_km > 0 else 0
     subsidy_valid = ratio <= 20.0
 
     return {
@@ -493,8 +496,8 @@ def build_summary(state):
         "path": path,
         "remaining_budget": round(state["budget"], 2),
         "finished": state["finished"],
-        "subsidized_km": round(skm, 1),
-        "total_km": round(tkm, 1),
+        "subsidized_km": round(subsidized_km, 1),
+        "total_km": round(total_km, 1),
         "subsidy_ratio": round(ratio, 1),
         "subsidy_valid": subsidy_valid,
         # ── ITEM 2.5 — Extra data for the final report ──

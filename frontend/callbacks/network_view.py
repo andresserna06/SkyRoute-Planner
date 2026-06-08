@@ -11,6 +11,24 @@ from frontend.config import COLORS, LAYOUTS, _placeholder
 from frontend.graph_helpers import build_elements, base_stylesheet
 
 
+def _path_highlight_rules(path):
+    # Violet highlight for a sequence of airports — fades all edges, then lights up
+    # the path edges + visited nodes. Shared by R2 route search and Proposals A/B.
+    rules = base_stylesheet() + [{"selector": "edge", "style": {"opacity": 0.07}}]
+    for i in range(len(path) - 1):
+        rules.append({
+            "selector": f'edge[source="{path[i]}"][target="{path[i+1]}"]',
+            "style": {"opacity": 1, "line-color": COLORS["highlight"],
+                      "target-arrow-color": COLORS["highlight"], "width": 2.8, "z-index": 99},
+        })
+    for node_id in path:
+        rules.append({
+            "selector": f'node[id="{node_id}"]',
+            "style": {"border-color": COLORS["highlight"], "border-width": 4},
+        })
+    return rules
+
+
 def register(app):
 
     @app.callback(
@@ -24,6 +42,8 @@ def register(app):
         Output("route-origin",          "options"),
         Output("route-dest",            "options"),
         Output("planner-origin",        "options"),
+        Output("prop-a-origin",         "options"),
+        Output("prop-b-origin",         "options"),
         Input("upload-json",            "contents"),
         State("upload-json",            "filename"),
     )
@@ -33,22 +53,22 @@ def register(app):
         _, content_string = contents.split(",")
         decoded = base64.b64decode(content_string)
         try:
-            data  = json.loads(decoded.decode("utf-8"))
-            g     = build_graph_from_dict(data)
-            elems = build_elements(g)
-            airport_opts = [{"label": f"{v.id} — {v.city}", "value": v.id}
-                            for v in sorted(g.vertices, key=lambda x: x.id)]
-            n_airports = len(g.vertices)
-            n_routes   = sum(len(v.adjacencies) for v in g.vertices)
-            n_hubs     = sum(1 for v in g.vertices if v.is_hub)
+            data     = json.loads(decoded.decode("utf-8"))
+            graph    = build_graph_from_dict(data)
+            elements = build_elements(graph)
+            airport_opts = [{"label": f"{vertex.id} — {vertex.city}", "value": vertex.id}
+                            for vertex in sorted(graph.vertices, key=lambda vertex: vertex.id)]
+            n_airports = len(graph.vertices)
+            n_routes   = sum(len(vertex.adjacencies) for vertex in graph.vertices)
+            n_hubs     = sum(1 for vertex in graph.vertices if vertex.is_hub)
             status = html.Span(f"✓  {filename}",
                                style={"color": COLORS["ok"], "fontSize": "11px", "fontWeight": "600"})
-            return (elems, str(n_airports), str(n_routes), str(n_hubs),
+            return (elements, str(n_airports), str(n_routes), str(n_hubs),
                     status, data, data,
-                    airport_opts, airport_opts, airport_opts)
+                    airport_opts, airport_opts, airport_opts, airport_opts, airport_opts)
         except Exception as e:
             status = html.Span(f"Error: {e}", style={"color": COLORS["error"], "fontSize": "11px"})
-            return [], "—", "—", "—", status, None, None, [], [], []
+            return [], "—", "—", "—", status, None, None, [], [], [], [], []
 
     @app.callback(
         Output("network-graph", "layout"),
@@ -58,60 +78,53 @@ def register(app):
         return LAYOUTS.get(layout_name, LAYOUTS["cose"])
 
     @app.callback(
-        Output("network-graph",        "stylesheet"),
-        Input("network-graph",         "tapNodeData"),
-        Input("clear-selection",       "n_clicks"),
-        Input("route-highlight-store", "data"),
-        Input("journey-store",         "data"),
-        Input("right-tabs",            "value"),
+        Output("network-graph",           "stylesheet"),
+        Input("network-graph",            "tapNodeData"),
+        Input("clear-selection",          "n_clicks"),
+        Input("route-highlight-store",    "data"),
+        Input("journey-store",            "data"),
+        Input("right-tabs",               "value"),
+        Input("proposal-highlight-store", "data"),
     )
-    def update_stylesheet(node_data, clear_clicks, route_hl, journey_data, active_tab):
-        triggered = dash.callback_context.triggered_id
+    def update_stylesheet(node_data, clear_clicks, route_highlight, journey_data, active_tab, proposal_highlight):
+        triggered_id = dash.callback_context.triggered_id
 
-        if triggered == "clear-selection":
+        if triggered_id == "clear-selection":
             return base_stylesheet()
 
         if active_tab == "planner" and journey_data and journey_data.get("segments"):
-            visited = journey_data.get("visited", [])
-            segs    = journey_data.get("segments", [])
+            visited  = journey_data.get("visited", [])
+            segments = journey_data.get("segments", [])
             rules = base_stylesheet() + [{"selector": "edge", "style": {"opacity": 0.07}}]
-            for seg in segs:
+            for seg in segments:
                 rules.append({
                     "selector": f'edge[source="{seg["origin"]}"][target="{seg["destination"]}"]',
                     "style": {"opacity": 1, "line-color": COLORS["hub"],
                               "target-arrow-color": COLORS["hub"], "width": 2.8},
                 })
-            for nid in visited:
+            for node_id in visited:
                 rules.append({
-                    "selector": f'node[id="{nid}"]',
+                    "selector": f'node[id="{node_id}"]',
                     "style": {"border-color": COLORS["hub"], "border-width": 4},
                 })
             return rules
 
-        if active_tab == "route" and route_hl and route_hl.get("path"):
-            path  = route_hl["path"]
-            rules = base_stylesheet() + [{"selector": "edge", "style": {"opacity": 0.07}}]
-            for i in range(len(path) - 1):
-                rules.append({
-                    "selector": f'edge[source="{path[i]}"][target="{path[i+1]}"]',
-                    "style": {"opacity": 1, "line-color": COLORS["highlight"],
-                              "target-arrow-color": COLORS["highlight"], "width": 2.8, "z-index": 99},
-                })
-            for nid in path:
-                rules.append({
-                    "selector": f'node[id="{nid}"]',
-                    "style": {"border-color": COLORS["highlight"], "border-width": 4},
-                })
-            return rules
+        # R2 route search: violet path on the "Buscar Ruta" tab
+        if active_tab == "route" and route_highlight and route_highlight.get("path"):
+            return _path_highlight_rules(route_highlight["path"])
 
-        if triggered not in (None, "right-tabs") and node_data:
-            nid = node_data["id"]
+        # Proposals A/B: violet path on the "$" and "🕐" tabs
+        if active_tab in ("propuesta-a", "propuesta-b") and proposal_highlight and proposal_highlight.get("path"):
+            return _path_highlight_rules(proposal_highlight["path"])
+
+        if triggered_id not in (None, "right-tabs") and node_data:
+            node_id = node_data["id"]
             return base_stylesheet() + [
                 {"selector": "edge", "style": {"opacity": 0.08}},
-                {"selector": f'edge[source="{nid}"]', "style": {
+                {"selector": f'edge[source="{node_id}"]', "style": {
                     "opacity": 1, "line-color": COLORS["highlight"],
                     "target-arrow-color": COLORS["highlight"], "width": 2.6, "z-index": 99}},
-                {"selector": f'node[id="{nid}"]',
+                {"selector": f'node[id="{node_id}"]',
                  "style": {"border-color": COLORS["highlight"], "border-width": 4}},
             ]
 

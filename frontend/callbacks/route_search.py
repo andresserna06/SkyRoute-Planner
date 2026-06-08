@@ -20,10 +20,10 @@ TOTAL_KEY = {
 }
 
 
-def _build_route_card(r, criteria):
-    meta = CRIT_META[criteria]
+def _build_route_card(route, criterion):
+    meta = CRIT_META[criterion]
     rows = []
-    for seg in r["segments"]:
+    for seg in route["segments"]:
         metric_value = seg.get(meta["key"], 0)
         if seg.get("subsidized"):
             row_style = {"backgroundColor": "#fef2f2", "color": "#dc2626"}
@@ -46,9 +46,9 @@ def _build_route_card(r, criteria):
                            "color": meta["color"], **row_style}),
         ]))
 
-    total_metric = r.get(TOTAL_KEY[criteria], 0)
+    total_metric = route.get(TOTAL_KEY[criterion], 0)
 
-    if criteria == "time":
+    if criterion == "time":
         total_label = f"{total_metric / 60:.2f} h"
     else:
         total_label = f"{total_metric:.1f} {meta['unit']}"
@@ -56,7 +56,7 @@ def _build_route_card(r, criteria):
     return html.Div(style={**CARD, "borderLeft": f"3px solid {meta['color']}"}, children=[
         html.Div(f"Ruta óptima — {meta['label']}",
                  style={"fontSize": "12px", "fontWeight": "700", "color": meta["color"], "marginBottom": "8px"}),
-        html.Div(" → ".join(r["path"]),
+        html.Div(" → ".join(route["path"]),
                  style={"fontSize": "13px", "fontWeight": "600", "color": COLORS["text"], "marginBottom": "10px"}),
         html.Table(style={"width": "100%", "borderCollapse": "collapse"}, children=[
             html.Thead(html.Tr([
@@ -103,9 +103,9 @@ def register(app):
             return html.P("Selecciona al menos un tipo de transporte.",
                           style={"color": COLORS["error"], "fontSize": "12px"}), None
 
-        g = build_graph_from_dict(graph_data)
+        graph = build_graph_from_dict(graph_data)
         results = find_best_routes(
-            g, origin, dest, criteria,
+            graph, origin, dest, criteria,
             include_secondary=(include_secondary == "yes"),
             preferred_aircraft=set(aircraft_types),
         )
@@ -113,15 +113,15 @@ def register(app):
         cards = []
         highlight_path = None
 
-        for r in results:
-            if r["success"]:
-                crit = r["criterion"]
-                cards.append(_build_route_card(r, crit))
+        for result in results:
+            if result["success"]:
+                criterion = result["criterion"]
+                cards.append(_build_route_card(result, criterion))
                 if highlight_path is None:
-                    highlight_path = r["path"]
+                    highlight_path = result["path"]
             else:
                 cards.append(html.P(
-                    f"Sin ruta {r['criterion']}: no existe conexión entre {origin} y {dest} "
+                    f"Sin ruta {result['criterion']}: no existe conexión entre {origin} y {dest} "
                     f"con los tipos de transporte y filtros seleccionados.",
                     style={"color": COLORS["error"], "fontSize": "12px", "marginTop": "6px"}
                 ))

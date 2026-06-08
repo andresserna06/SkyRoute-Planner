@@ -3,37 +3,37 @@
 from frontend.config import COLORS
 
 
-def build_elements(g):
+def build_elements(graph):
     # Convert Graph object into Cytoscape elements (nodes + edges)
     elements = []
 
     # Create Cytoscape nodes for each airport
-    for v in g.vertices:
+    for vertex in graph.vertices:
         elements.append({
             "data": {
-                "id": v.id,
-                "label": v.id,
-                "full_name": v.name,
-                "city": v.city,
-                "country": v.country,
-                "timezone": v.timezone,
-                "airlines": ", ".join(v.airlines) if v.airlines else "N/A",
-                "node_type": "hub" if v.is_hub else "secondary",
+                "id": vertex.id,
+                "label": vertex.id,
+                "full_name": vertex.name,
+                "city": vertex.city,
+                "country": vertex.country,
+                "timezone": vertex.timezone,
+                "airlines": ", ".join(vertex.airlines) if vertex.airlines else "N/A",
+                "node_type": "hub" if vertex.is_hub else "secondary",
             },
-            "classes": "hub" if v.is_hub else "secondary",
+            "classes": "hub" if vertex.is_hub else "secondary",
         })
 
     # Create Cytoscape edges for each route
-    for v in g.vertices:
-        for edge in v.adjacencies:
-            abbrevs = []
-            for a in edge.aircraft:
-                if "Comercial" in a or "Commercial" in a:
-                    abbrevs.append("C")
-                elif "Regional" in a:
-                    abbrevs.append("R")
+    for vertex in graph.vertices:
+        for edge in vertex.adjacencies:
+            aircraft_codes = []
+            for aircraft in edge.aircraft:
+                if "Comercial" in aircraft or "Commercial" in aircraft:
+                    aircraft_codes.append("C")
+                elif "Regional" in aircraft:
+                    aircraft_codes.append("R")
                 else:
-                    abbrevs.append("H")
+                    aircraft_codes.append("H")
 
             if edge.is_blocked:
                 classes = "bloqueada"
@@ -44,9 +44,9 @@ def build_elements(g):
 
             elements.append({
                 "data": {
-                    "source": v.id,
+                    "source": vertex.id,
                     "target": edge.destination_vertex.id,
-                    "label": f"{int(edge.distance_km)} km · {','.join(abbrevs)}",
+                    "label": f"{int(edge.distance_km)} km · {','.join(aircraft_codes)}",
                     "distance_km": edge.distance_km,
                     "aircraft": ", ".join(edge.aircraft),
                 },

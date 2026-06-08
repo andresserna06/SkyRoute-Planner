@@ -85,20 +85,20 @@ def register(app):
         )
 
         if edge_in_plan:
-            g = build_graph_from_dict(graph_data)
+            graph = build_graph_from_dict(graph_data)
 
-            def edge_filter(e):
-                key = f"{e.origin_vertex.id}->{e.destination_vertex.id}"
+            def edge_filter(edge):
+                key = f"{edge.origin_vertex.id}->{edge.destination_vertex.id}"
                 return key not in blocked_list
 
             if segments:
                 last_dest = segments[-1]["destination"]
-                dist, pred, path = g.dijkstra(
+                distances, predecessors, path = graph.dijkstra(
                     current_id,
                     last_dest,
                     edge_filter=edge_filter,
                 )
-                if dist.get(last_dest, math.inf) < math.inf:
+                if distances.get(last_dest, math.inf) < math.inf:
                     journey_data["reroute_notice"] = (
                         f"Route {origin}->{destination} blocked. "
                         f"Rerouted: {' -> '.join(path)}"
@@ -122,12 +122,12 @@ def register(app):
             raise dash.exceptions.PreventUpdate
         # Allow empty list to reset all blocked visuals
         blocked_list = blocked_list or []
-        g = build_graph_from_dict(graph_data)
+        graph = build_graph_from_dict(graph_data)
         from frontend.graph_helpers import build_elements
-        elements = build_elements(g)
-        for elem in elements:
-            if "source" in elem.get("data", {}):
-                key = f"{elem['data']['source']}->{elem['data']['target']}"
+        elements = build_elements(graph)
+        for element in elements:
+            if "source" in element.get("data", {}):
+                key = f"{element['data']['source']}->{element['data']['target']}"
                 if key in blocked_list:
-                    elem["classes"] = "bloqueada"
+                    element["classes"] = "bloqueada"
         return elements

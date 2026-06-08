@@ -20,6 +20,7 @@ def build_layout():
             dcc.Store(id="graph-store"),
             dcc.Store(id="journey-store"),
             dcc.Store(id="route-highlight-store"),
+            dcc.Store(id="proposal-highlight-store"),
             dcc.Store(id="original-graph-store"),
             dcc.Store(id="blocked-edges-store", data=[]),
             dcc.Store(id="flight-progress-store", data=None),

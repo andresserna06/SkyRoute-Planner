@@ -11,9 +11,7 @@ class Edge:
         self.is_blocked = False
 
     def get_weight(self):
-        return self.distance_km
-
-    def getPeso(self):
+        # Default edge weight = distance in km (used by Dijkstra when no weight_func is given)
         return self.distance_km
 
     def __repr__(self):
