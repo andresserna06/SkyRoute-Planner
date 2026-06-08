@@ -19,12 +19,13 @@ def register(app):
         Output("stat-routes",    "children"),
         Output("stat-hubs",      "children"),
         Output("upload-status",  "children"),
-        Output("graph-store",    "data"),
-        Output("route-origin",   "options"),
-        Output("route-dest",     "options"),
-        Output("planner-origin", "options"),
-        Input("upload-json",     "contents"),
-        State("upload-json",     "filename"),
+        Output("graph-store",           "data"),
+        Output("original-graph-store",  "data"),
+        Output("route-origin",          "options"),
+        Output("route-dest",            "options"),
+        Output("planner-origin",        "options"),
+        Input("upload-json",            "contents"),
+        State("upload-json",            "filename"),
     )
     def load_uploaded_json(contents, filename):
         # User uploaded a JSON file: parse it, build the graph and update the UI
@@ -44,10 +45,10 @@ def register(app):
             n_hubs     = sum(1 for v in g.vertices if v.is_hub)
             status = html.Span(f"✓  {filename}",
                                style={"color": COLORS["ok"], "fontSize": "11px", "fontWeight": "600"})
-            return elems, str(n_airports), str(n_routes), str(n_hubs), status, data, airport_opts, airport_opts, airport_opts
+            return elems, str(n_airports), str(n_routes), str(n_hubs), status, data, data, airport_opts, airport_opts, airport_opts
         except Exception as e:
             status = html.Span(f"Error: {e}", style={"color": COLORS["error"], "fontSize": "11px"})
-            return [], "—", "—", "—", status, None, [], [], []
+            return [], "—", "—", "—", status, None, None, [], [], []
 
     @app.callback(Output("network-graph", "layout"), Input("layout-dropdown", "value"))
     def update_layout(layout_name):
@@ -60,14 +61,21 @@ def register(app):
         Input("clear-selection",       "n_clicks"),
         Input("route-highlight-store", "data"),
         Input("journey-store",         "data"),
+        Input("right-tabs",            "value"),
     )
-    def update_stylesheet(node_data, clear_clicks, route_hl, journey_data):
+    def update_stylesheet(node_data, clear_clicks, route_hl, journey_data, active_tab):
         # Update the graph styling based on user interaction:
-        # click a node, highlight a route (R2), or show journey path (R3)
+        # click a node, highlight a route (R2), or show journey path (R3).
+        # Each highlight mode is gated to its own tab so stale store data
+        # from a previous tab never blocks node-click interaction.
         triggered = dash.callback_context.triggered_id
 
-        # R3: highlight the flown path in orange
-        if journey_data and journey_data.get("segments"):
+        # "Ver todo" button always resets to base
+        if triggered == "clear-selection":
+            return base_stylesheet()
+
+        # R3: journey path highlight — only while on the Planificador tab
+        if active_tab == "planner" and journey_data and journey_data.get("segments"):
             visited = journey_data.get("visited", [])
             segs    = journey_data.get("segments", [])
             rules = base_stylesheet() + [{"selector": "edge", "style": {"opacity": 0.07}}]
@@ -80,8 +88,8 @@ def register(app):
                               "style": {"border-color": COLORS["hub"], "border-width": 4}})
             return rules
 
-        # R2: highlight the optimal route path in violet
-        if route_hl and route_hl.get("path"):
+        # R2: route search highlight — only while on the Buscar Ruta tab
+        if active_tab == "route" and route_hl and route_hl.get("path"):
             path  = route_hl["path"]
             rules = base_stylesheet() + [{"selector": "edge", "style": {"opacity": 0.07}}]
             for i in range(len(path) - 1):
@@ -94,8 +102,9 @@ def register(app):
                               "style": {"border-color": COLORS["highlight"], "border-width": 4}})
             return rules
 
-        # R1: highlight outgoing routes from a clicked node
-        if triggered not in ("clear-selection", None) and node_data:
+        # R1: node-click adjacency highlight — available on any tab,
+        # but skip if the trigger was just a tab switch (stale tapNodeData)
+        if triggered not in (None, "right-tabs") and node_data:
             nid = node_data["id"]
             return base_stylesheet() + [
                 {"selector": "edge", "style": {"opacity": 0.08}},
